@@ -452,11 +452,11 @@ export default function GroupayDashboard() {
                   const percent = rows.length ? Math.round((paid / rows.length) * 100) : 0;
                   return (
                     <li key={group.id}>
-                      <div className="row static wrap">
+                      <button className="row" onClick={() => openGroupFrom(group.id)}>
                         <span className="row-main"><strong>{group.name}</strong><small>{group.sport} · vence dia {group.dueDay} · {formatMoney(group.amount)}/mês</small></span>
                         <span className="bar-mini"><span style={{ width: `${percent}%` }} /><small>{paid}/{rows.length} pagos</small></span>
-                        <button className="mini dark" onClick={() => openGroupFrom(group.id)}>Abrir</button>
-                      </div>
+                        <ChevronRight size={16} className="chev" />
+                      </button>
                     </li>
                   );
                 })}
