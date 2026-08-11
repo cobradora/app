@@ -112,6 +112,45 @@ describe("checkout service (InfinitePay, sem split)", () => {
     expect(createCheckout).toHaveBeenCalledTimes(1);
   });
 
+  it("rejeita uma segunda sessao para uma charge ja reservada por outro checkout (evita corrida de pagamento duplicado)", async () => {
+    const pendingCharges = await db.select().from(charges);
+    const chargeId = pendingCharges[0].id;
+
+    await createCheckoutForCharges(groupPublicSlug, phone, [chargeId], "idem-primeira-sessao");
+
+    const [charge] = await db.select().from(charges).where(eq(charges.id, chargeId));
+    expect(charge.status).toBe("checkout_pending");
+
+    await expect(
+      createCheckoutForCharges(groupPublicSlug, phone, [chargeId], "idem-segunda-sessao-diferente"),
+    ).rejects.toThrow(/não estão mais disponíveis/);
+
+    const sessions = await db.select().from(checkoutSessions);
+    expect(sessions).toHaveLength(1);
+  });
+
+  it("libera a reserva das charges se a criacao do checkout na InfinitePay falhar", async () => {
+    const pendingCharges = await db.select().from(charges);
+    const chargeId = pendingCharges[0].id;
+
+    (getPaymentsAdapter() as unknown as { createCheckout: Mock }).createCheckout.mockRejectedValueOnce(
+      new Error("InfinitePay indisponível"),
+    );
+
+    await expect(createCheckoutForCharges(groupPublicSlug, phone, [chargeId], "idem-falha-gateway")).rejects.toThrow(
+      "InfinitePay indisponível",
+    );
+
+    const [charge] = await db.select().from(charges).where(eq(charges.id, chargeId));
+    expect(charge.status).toBe("open");
+
+    const [session] = await db
+      .select()
+      .from(checkoutSessions)
+      .where(eq(checkoutSessions.idempotencyKey, "idem-falha-gateway"));
+    expect(session.status).toBe("canceled");
+  });
+
   it("grava webhookTokenHash (SHA-256 hex) na sessao criada", async () => {
     const pendingCharges = await db.select().from(charges);
     const result = await createCheckoutForCharges(

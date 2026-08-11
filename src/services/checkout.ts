@@ -25,12 +25,18 @@ function today(): string {
  * participante de um grupo publico.
  *
  * RB-006: o valor cobrado e sempre recalculado no backend a partir de
- * charges.totalAmount das charges selecionadas (status "open" ou
- * "checkout_pending") — o cliente nunca informa (nem tem como alterar) o
- * valor final.
+ * charges.totalAmount das charges selecionadas — o cliente nunca informa
+ * (nem tem como alterar) o valor final.
  * RB-009: idempotencia via checkoutSessions.idempotencyKey (unique) — uma
  * segunda chamada com a mesma key reaproveita a sessao ja criada em vez de
  * duplicar a cobranca.
+ *
+ * Reserva atomica: uma charge so pode ser selecionada para uma NOVA sessao
+ * enquanto estiver "open". O claim (UPDATE ... WHERE status = 'open') e'
+ * atomico no banco, entao duas requisicoes concorrentes (abas duplicadas,
+ * retry com idempotencyKey diferente) nunca conseguem reservar a mesma
+ * charge em duas sessoes de checkout simultaneas — a segunda falha com erro
+ * em vez de gerar dois links de pagamento validos para a mesma cobranca.
  */
 export async function createCheckoutForCharges(
   groupPublicSlug: string,
@@ -85,78 +91,95 @@ export async function createCheckoutForCharges(
     return { checkoutSessionId: existingSession.id, checkoutUrl: existingSession.checkoutUrl, totalChargesAmount };
   }
 
-  const selectedCharges = await db
-    .select()
-    .from(charges)
-    .where(
-      and(
-        inArray(charges.id, chargeIds),
-        eq(charges.participantId, participant.id),
-        inArray(charges.status, ["open", "checkout_pending"]),
-      ),
-    );
-
-  if (selectedCharges.length === 0) {
-    throw new Error("Nenhuma cobrança pendente encontrada para os IDs informados");
-  }
-
-  // RB-006: soma recalculada no backend, nunca aceita do cliente.
-  const totalChargesAmount = selectedCharges.reduce((sum, charge) => sum + charge.totalAmount, 0);
-
   const webhookToken = randomBytes(32).toString("base64url");
   const webhookTokenHash = sha256Hex(webhookToken);
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
 
   // A sessao e salva no banco ANTES de chamar a InfinitePay (mesmo padrao do
   // portal-de-torcida em create-order.mjs), para que o id gerado pelo banco
-  // sirva de order_nsu determinístico.
-  const [session] = await db
-    .insert(checkoutSessions)
-    .values({
-      organizationId: group.organizationId,
-      participantId: participant.id,
-      gateway: "infinitepay",
-      status: "created",
-      expiresAt,
-      idempotencyKey,
-      webhookTokenHash,
-    })
-    .returning();
+  // sirva de order_nsu determinístico. O claim das charges e a criacao da
+  // sessao/itens acontecem na mesma transacao — se o claim nao pegar todas
+  // as charges pedidas (porque outra sessao concorrente ja reservou alguma),
+  // a transacao inteira e desfeita.
+  const { session, claimedCharges, totalChargesAmount } = await db.transaction(async (tx) => {
+    const claimedCharges = await tx
+      .update(charges)
+      .set({ status: "checkout_pending" })
+      .where(
+        and(
+          inArray(charges.id, chargeIds),
+          eq(charges.participantId, participant.id),
+          eq(charges.status, "open"),
+        ),
+      )
+      .returning();
 
-  const { checkoutUrl, gatewayCheckoutId } = await getPaymentsAdapter().createCheckout({
-    organizationId: group.organizationId,
-    participantId: participant.id,
-    amount: totalChargesAmount,
-    splits: [],
-    dueDate: today(),
-    idempotencyKey,
-    gatewayExternalAccountId: gatewayAccount.externalAccountId,
-    externalReference: session.id,
-    webhookToken,
-  });
+    if (claimedCharges.length === 0 || claimedCharges.length !== chargeIds.length) {
+      throw new Error(
+        "Uma ou mais cobranças não estão mais disponíveis para pagamento (já pagas ou com um checkout em andamento)",
+      );
+    }
 
-  await db
-    .update(checkoutSessions)
-    .set({ gatewayCheckoutId, checkoutUrl })
-    .where(eq(checkoutSessions.id, session.id));
+    // RB-006: soma recalculada no backend, nunca aceita do cliente.
+    const totalChargesAmount = claimedCharges.reduce((sum, charge) => sum + charge.totalAmount, 0);
 
-  await db.insert(checkoutItems).values(
-    selectedCharges.map((charge) => ({
-      checkoutSessionId: session.id,
-      chargeId: charge.id,
-      amount: charge.totalAmount,
-    })),
-  );
+    const [session] = await tx
+      .insert(checkoutSessions)
+      .values({
+        organizationId: group.organizationId,
+        participantId: participant.id,
+        gateway: "infinitepay",
+        status: "created",
+        expiresAt,
+        idempotencyKey,
+        webhookTokenHash,
+      })
+      .returning();
 
-  await db
-    .update(charges)
-    .set({ status: "checkout_pending" })
-    .where(
-      inArray(
-        charges.id,
-        selectedCharges.map((c) => c.id),
-      ),
+    await tx.insert(checkoutItems).values(
+      claimedCharges.map((charge) => ({
+        checkoutSessionId: session.id,
+        chargeId: charge.id,
+        amount: charge.totalAmount,
+      })),
     );
 
-  return { checkoutSessionId: session.id, checkoutUrl, totalChargesAmount };
+    return { session, claimedCharges, totalChargesAmount };
+  });
+
+  try {
+    const { checkoutUrl, gatewayCheckoutId } = await getPaymentsAdapter().createCheckout({
+      organizationId: group.organizationId,
+      participantId: participant.id,
+      amount: totalChargesAmount,
+      splits: [],
+      dueDate: today(),
+      idempotencyKey,
+      gatewayExternalAccountId: gatewayAccount.externalAccountId,
+      externalReference: session.id,
+      webhookToken,
+    });
+
+    await db
+      .update(checkoutSessions)
+      .set({ gatewayCheckoutId, checkoutUrl })
+      .where(eq(checkoutSessions.id, session.id));
+
+    return { checkoutSessionId: session.id, checkoutUrl, totalChargesAmount };
+  } catch (error) {
+    // A criacao do link externo falhou: libera a reserva das charges (volta
+    // para "open") em vez de deixa-las presas em "checkout_pending" para
+    // sempre, e marca a sessao como cancelada.
+    await db
+      .update(charges)
+      .set({ status: "open" })
+      .where(
+        inArray(
+          charges.id,
+          claimedCharges.map((c) => c.id),
+        ),
+      );
+    await db.update(checkoutSessions).set({ status: "canceled" }).where(eq(checkoutSessions.id, session.id));
+    throw error;
+  }
 }
