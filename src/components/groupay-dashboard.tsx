@@ -104,12 +104,13 @@ export default function GroupayDashboard() {
   function go(next: ViewId) {
     setView(next);
     setOpenGroupId(null);
-    setMenuOpen(false);
+    // Navegação não deve mexer no sidebar — abrir/fechar é responsabilidade
+    // exclusiva do clique no ícone de 3 listras (ver botão "Abrir menu" e o
+    // botão/overlay de fechar do próprio sidebar).
   }
 
   function openGroupFrom(id: string) {
     setOpenGroupId(id);
-    setMenuOpen(false);
   }
 
   function nameOf(participantId: string) {
