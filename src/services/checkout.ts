@@ -74,25 +74,15 @@ export async function createCheckoutForCharges(
       .where(eq(checkoutItems.checkoutSessionId, existingSession.id));
     const totalChargesAmount = existingItems.reduce((sum, item) => sum + item.amount, 0);
 
-    // Nao ha coluna dedicada para persistir a checkoutUrl (fora do escopo
-    // desta fase, que so autoriza a coluna webhookTokenHash em
-    // checkoutSessions). Para devolver uma URL valida ao cliente, refazemos
-    // a chamada de criacao de link usando o MESMO order_nsu (o id da sessao
-    // ja existente, via externalReference) — a InfinitePay trata order_nsu
-    // como a identidade do pedido, entao isso reaponta para o mesmo link
-    // de checkout em vez de criar uma cobranca nova.
-    const { checkoutUrl } = await getPaymentsAdapter().createCheckout({
-      organizationId: group.organizationId,
-      participantId: participant.id,
-      amount: totalChargesAmount,
-      splits: [],
-      dueDate: today(),
-      idempotencyKey,
-      gatewayExternalAccountId: gatewayAccount.externalAccountId,
-      externalReference: existingSession.id,
-    });
+    // checkoutUrl fica persistida na sessao — reaproveitamos o link ja
+    // gerado em vez de rechamar a InfinitePay, que nao garante que um
+    // order_nsu repetido devolva a mesma URL (idempotencia real, sem
+    // depender do comportamento da API deles).
+    if (!existingSession.checkoutUrl) {
+      throw new Error("Sessão de checkout existente sem checkoutUrl — estado inconsistente");
+    }
 
-    return { checkoutSessionId: existingSession.id, checkoutUrl, totalChargesAmount };
+    return { checkoutSessionId: existingSession.id, checkoutUrl: existingSession.checkoutUrl, totalChargesAmount };
   }
 
   const selectedCharges = await db
@@ -145,7 +135,10 @@ export async function createCheckoutForCharges(
     webhookToken,
   });
 
-  await db.update(checkoutSessions).set({ gatewayCheckoutId }).where(eq(checkoutSessions.id, session.id));
+  await db
+    .update(checkoutSessions)
+    .set({ gatewayCheckoutId, checkoutUrl })
+    .where(eq(checkoutSessions.id, session.id));
 
   await db.insert(checkoutItems).values(
     selectedCharges.map((charge) => ({

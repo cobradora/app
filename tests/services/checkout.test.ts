@@ -88,12 +88,28 @@ describe("checkout service (InfinitePay, sem split)", () => {
     const second = await createCheckoutForCharges(groupPublicSlug, phone, chargeIds, "idem-repetida");
 
     expect(second.checkoutSessionId).toBe(first.checkoutSessionId);
+    expect(second.checkoutUrl).toBe(first.checkoutUrl);
 
     const sessions = await db
       .select()
       .from(checkoutSessions)
       .where(eq(checkoutSessions.idempotencyKey, "idem-repetida"));
     expect(sessions).toHaveLength(1);
+    expect(sessions[0].checkoutUrl).toBe(first.checkoutUrl);
+  });
+
+  it("no reuso da idempotencyKey, NAO rechama a InfinitePay (idempotencia real via checkoutUrl persistida)", async () => {
+    const pendingCharges = await db.select().from(charges);
+    const chargeIds = [pendingCharges[0].id];
+
+    await createCheckoutForCharges(groupPublicSlug, phone, chargeIds, "idem-sem-rechamada");
+
+    const createCheckout = (getPaymentsAdapter() as unknown as { createCheckout: Mock }).createCheckout;
+    expect(createCheckout).toHaveBeenCalledTimes(1);
+
+    await createCheckoutForCharges(groupPublicSlug, phone, chargeIds, "idem-sem-rechamada");
+
+    expect(createCheckout).toHaveBeenCalledTimes(1);
   });
 
   it("grava webhookTokenHash (SHA-256 hex) na sessao criada", async () => {
