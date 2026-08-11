@@ -11,7 +11,8 @@
     "test:watch": "dotenv -e .env.test -- vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
-    "db:migrate:test": "dotenv -e .env.test -- drizzle-kit migrate"
+    "db:migrate:test": "dotenv -e .env.test -- drizzle-kit migrate",
+    "db:seed": "dotenv -e .env.local -- tsx src/db/seed.ts"
   },
   "dependencies": {
     "dotenv": "17.3.1",
@@ -37,6 +38,7 @@
     "eslint-config-next": "16.2.6",
     "postcss": "8.5.8",
     "tailwindcss": "4.1.17",
+    "tsx": "^4.23.12",
     "typescript": "5.9.3",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^4.1.10"
