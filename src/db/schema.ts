@@ -156,6 +156,7 @@ export const checkoutSessions = pgTable("checkout_sessions", {
   status: checkoutSessionStatusEnum("status").notNull().default("created"),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+  webhookTokenHash: varchar("webhook_token_hash", { length: 64 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   idempotencyUnique: uniqueIndex("checkout_sessions_idempotency_unique").on(table.idempotencyKey),
