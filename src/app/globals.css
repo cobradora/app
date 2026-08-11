@@ -114,6 +114,11 @@ button.row:hover { background: #f5f7f7; }
 .modal h2 { font-size: 17px; }
 .modal label { display: block; margin: 12px 0 6px; font-size: 11px; font-weight: 650; }
 .modal input { width: 100%; height: 38px; padding: 0 11px; border: 1px solid var(--line-2); border-radius: 7px; background: #fafbfb; font-size: 13px; }
+.modal select { width: 100%; height: 38px; padding: 0 11px; border: 1px solid var(--line-2); border-radius: 7px; background: #fafbfb; font-size: 13px; }
+.modal textarea { width: 100%; min-height: 72px; padding: 9px 11px; border: 1px solid var(--line-2); border-radius: 7px; background: #fafbfb; font-size: 13px; font: inherit; resize: vertical; }
+.modal-error { margin: 10px 0 0; color: #b3453f; font-size: 11.5px; }
+.modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+.modal-actions .mini, .modal-actions .solid { flex: 1; height: 38px; }
 
 .detail-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .mini.primary { background: #274a3b; border-color: #274a3b; color: #fff; }

@@ -18,7 +18,8 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { apiClient, type ManualSettlementInput } from "@/lib/api-client";
 import {
   type Charge,
   type Group,
@@ -58,6 +59,13 @@ export default function GroupayDashboard() {
   const [memberForm, setMemberForm] = useState({ name: "", phone: "" });
   const [pixInput, setPixInput] = useState("");
 
+  // Manual settlement modal state
+  const [settleModal, setSettleModal] = useState<null | { chargeId: string }>(null);
+  const [settleMethod, setSettleMethod] = useState<ManualSettlementInput["paymentMethod"]>("dinheiro");
+  const [settleObservation, setSettleObservation] = useState("");
+  const [settleError, setSettleError] = useState("");
+  const [settleSaving, setSettleSaving] = useState(false);
+
   // Checkout flow state
   const [checkout, setCheckout] = useState<null | { participant: Participant; group: Group }>(null);
   const [checkoutStep, setCheckoutStep] = useState<"identify" | "confirm">("identify");
@@ -84,6 +92,15 @@ export default function GroupayDashboard() {
     window.setTimeout(() => setNotice(""), 2400);
   }
 
+  useEffect(() => {
+    if (!settleModal) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setSettleModal(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [settleModal]);
+
   function go(next: ViewId) {
     setView(next);
     setOpenGroupId(null);
@@ -103,15 +120,37 @@ export default function GroupayDashboard() {
     return groups.find((g) => g.id === groupId);
   }
 
-  function settle(chargeId: string) {
-    setCharges((prev) =>
-      prev.map((charge) =>
-        charge.id === chargeId && charge.status === "pending"
-          ? { ...charge, status: "paid", source: "manual", paidAt: `${charge.competence}-15` }
-          : charge,
-      ),
-    );
-    flash("Pagamento registrado manualmente");
+  function openSettleModal(chargeId: string) {
+    setSettleModal({ chargeId });
+    setSettleMethod("dinheiro");
+    setSettleObservation("");
+    setSettleError("");
+  }
+
+  async function confirmSettle() {
+    if (!settleModal) return;
+    const { chargeId } = settleModal;
+    setSettleSaving(true);
+    setSettleError("");
+    try {
+      await apiClient.registerManualSettlement(chargeId, {
+        paymentMethod: settleMethod,
+        observation: settleObservation.trim() || undefined,
+      });
+      setCharges((prev) =>
+        prev.map((charge) =>
+          charge.id === chargeId && charge.status === "pending"
+            ? { ...charge, status: "paid", source: "manual", paidAt: `${charge.competence}-15` }
+            : charge,
+        ),
+      );
+      setSettleModal(null);
+      flash("Pagamento registrado manualmente");
+    } catch (error) {
+      setSettleError(error instanceof Error ? error.message : "Erro ao registrar pagamento");
+    } finally {
+      setSettleSaving(false);
+    }
   }
 
   function copyText(value: string, message: string) {
@@ -264,6 +303,39 @@ export default function GroupayDashboard() {
         </div>
       )}
 
+      {settleModal && (
+        <div className="backdrop" onMouseDown={() => !settleSaving && setSettleModal(null)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Baixa manual" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-top"><h2>Baixa manual</h2><button className="ghost-icon" onClick={() => setSettleModal(null)} aria-label="Fechar" disabled={settleSaving}><X size={18} /></button></div>
+            <label htmlFor="settle-method">Forma de pagamento</label>
+            <select
+              id="settle-method"
+              value={settleMethod}
+              onChange={(e) => setSettleMethod(e.target.value as ManualSettlementInput["paymentMethod"])}
+              disabled={settleSaving}
+            >
+              <option value="dinheiro">Dinheiro</option>
+              <option value="transferencia">Transferência</option>
+              <option value="outro">Outro</option>
+            </select>
+            <label htmlFor="settle-observation">Observação (opcional)</label>
+            <textarea
+              id="settle-observation"
+              value={settleObservation}
+              onChange={(e) => setSettleObservation(e.target.value)}
+              placeholder="Ex: pago em espécie no vestiário"
+              rows={3}
+              disabled={settleSaving}
+            />
+            {settleError && <p className="modal-error">{settleError}</p>}
+            <div className="modal-actions">
+              <button className="mini" onClick={() => setSettleModal(null)} disabled={settleSaving}>Cancelar</button>
+              <button className="solid" onClick={confirmSettle} disabled={settleSaving}>{settleSaving ? "Salvando…" : "Confirmar"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {checkout && (
         <NativeCheckout
           group={checkout.group}
@@ -319,7 +391,7 @@ export default function GroupayDashboard() {
               nameOf={nameOf}
               onBack={() => setOpenGroupId(null)}
               onAddMember={() => setMemberModal(true)}
-              onSettle={settle}
+              onSettle={openSettleModal}
               onCopyLink={() => copyText(memberLink(openGroup), `Link de ${openGroup.name} copiado`)}
               onCopyMessage={() => createChargeMessage(openGroup)}
               onOpenCheckout={() => openCheckout(openGroup)}
@@ -361,7 +433,7 @@ export default function GroupayDashboard() {
                           <span className="badge soft">{nameOf(charge.participantId).slice(0, 2).toUpperCase()}</span>
                           <span className="row-main"><strong>{nameOf(charge.participantId)}</strong><small>{groupOf(charge.groupId)?.name}</small></span>
                           <strong className="value">{formatMoney(charge.amount)}</strong>
-                          <button className="mini" onClick={() => settle(charge.id)}>Dar baixa</button>
+                          <button className="mini" onClick={() => openSettleModal(charge.id)}>Dar baixa</button>
                         </div>
                       </li>
                     ))}
@@ -396,7 +468,7 @@ export default function GroupayDashboard() {
                 charges={periodCharges}
                 nameOf={nameOf}
                 groupOf={groupOf}
-                onSettle={settle}
+                onSettle={openSettleModal}
               />
             </section>
           ) : (
