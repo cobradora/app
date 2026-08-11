@@ -1,11 +1,21 @@
 import { db } from "@/db";
-import { organizations, users } from "@/db/schema";
+import { organizations, users, gatewayAccounts } from "@/db/schema";
 import { createSession } from "@/lib/session";
 
 async function seed() {
   const [org] = await db
     .insert(organizations)
     .values({ name: "Arena Martins" })
+    .returning();
+
+  const [gatewayAccount] = await db
+    .insert(gatewayAccounts)
+    .values({
+      organizationId: org.id,
+      provider: "infinitepay",
+      externalAccountId: process.env.INFINITEPAY_DEV_HANDLE ?? "handle-dev-placeholder",
+      status: "active",
+    })
     .returning();
 
   const [user] = await db
@@ -26,6 +36,8 @@ async function seed() {
 
   console.log("Organization ID:", org.id);
   console.log("User ID:", user.id);
+  console.log("Gateway account (InfinitePay) ID:", gatewayAccount.id);
+  console.log("Gateway account handle:", gatewayAccount.externalAccountId);
   console.log("Cookie groupay_session:", token);
 }
 
