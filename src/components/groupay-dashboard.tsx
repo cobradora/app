@@ -9,7 +9,6 @@ import {
   CreditCard,
   Copy,
   LayoutDashboard,
-  Lock,
   Menu,
   Plus,
   Settings,
@@ -65,12 +64,6 @@ export default function GroupayDashboard() {
   const [settleObservation, setSettleObservation] = useState("");
   const [settleError, setSettleError] = useState("");
   const [settleSaving, setSettleSaving] = useState(false);
-
-  // Checkout flow state
-  const [checkout, setCheckout] = useState<null | { participant: Participant; group: Group }>(null);
-  const [checkoutStep, setCheckoutStep] = useState<"identify" | "confirm">("identify");
-  const [phoneInput, setPhoneInput] = useState("");
-  const [fullName, setFullName] = useState("");
 
   const periodCharges = useMemo(
     () => charges.filter((charge) => charge.competence === competence),
@@ -187,24 +180,6 @@ export default function GroupayDashboard() {
     ].join("\n");
   }
 
-  function findOrCreateByPhone(groupId: string, phone: string): Participant {
-    const digits = phone.replace(/\D/g, "");
-    const existing = participants.find((p) => p.groupIds.includes(groupId) && p.phone.replace(/\D/g, "") === digits);
-    if (existing) return existing;
-
-    const id = `auto-${digits}`;
-    let participant = participants.find((p) => p.phone.replace(/\D/g, "") === digits);
-    if (participant) {
-      const updated = { ...participant, groupIds: [...participant.groupIds, groupId] };
-      setParticipants((prev) => prev.map((p) => (p.id === participant!.id ? updated : p)));
-      participant = updated;
-    } else {
-      participant = { id, name: `Participante ${phone}`, initials: "??", phone, groupIds: [groupId] };
-      setParticipants((prev) => [...prev, participant!]);
-    }
-    return participant;
-  }
-
   function addMember(groupId: string) {
     const name = memberForm.name.trim();
     const phone = memberForm.phone.trim();
@@ -236,27 +211,6 @@ export default function GroupayDashboard() {
   function createChargeMessage(group: Group) {
     const message = buildChargeMessage(group.id, competence);
     copyText(message, `Mensagem de ${group.name} copiada`);
-  }
-
-  function openCheckout(group: Group) {
-    setCheckout({ participant: null as never, group });
-    setCheckoutStep("identify");
-    setPhoneInput("");
-  }
-
-  function identifyParticipant() {
-    if (!checkout) return;
-    const participant = findOrCreateByPhone(checkout.group.id, phoneInput);
-    setCheckout({ participant, group: checkout.group });
-    setCheckoutStep("confirm");
-  }
-
-  function copyPix() {
-    if (!settings.pixKey) {
-      flash("Nenhuma chave PIX cadastrada pelo organizador");
-      return;
-    }
-    copyText(settings.pixKey, "Chave PIX copiada");
   }
 
   return (
@@ -337,23 +291,6 @@ export default function GroupayDashboard() {
         </div>
       )}
 
-      {checkout && (
-        <NativeCheckout
-          group={checkout.group}
-          participant={checkout.participant}
-          step={checkoutStep}
-          amount={groupOf(checkout.group.id)?.amount ?? 0}
-          pixKey={settings.pixKey}
-          phone={phoneInput}
-          fullName={fullName}
-          setFullName={setFullName}
-          onPhone={setPhoneInput}
-          onIdentify={identifyParticipant}
-          onCopyPix={copyPix}
-          onConfirm={() => { setCheckout(null); setView("overview"); flash("Pagamento enviado para conciliação"); }}
-        />
-      )}
-
       <aside className={`side ${menuOpen ? "open" : ""}`}>
         <div className="side-top">
           <span className="logo"><b /> groupay</span>
@@ -395,7 +332,6 @@ export default function GroupayDashboard() {
               onSettle={openSettleModal}
               onCopyLink={() => copyText(memberLink(openGroup), `Link de ${openGroup.name} copiado`)}
               onCopyMessage={() => createChargeMessage(openGroup)}
-              onOpenCheckout={() => openCheckout(openGroup)}
             />
           ) : view === "overview" ? (
             <>
@@ -494,77 +430,6 @@ export default function GroupayDashboard() {
   );
 }
 
-function NativeCheckout({
-  group,
-  participant,
-  step,
-  amount,
-  pixKey,
-  phone,
-  fullName,
-  setFullName,
-  onPhone,
-  onIdentify,
-  onCopyPix,
-  onConfirm,
-}: {
-  group: Group;
-  participant: Participant;
-  step: "identify" | "confirm";
-  amount: number;
-  pixKey: string;
-  phone: string;
-  fullName: string;
-  setFullName: (value: string) => void;
-  onPhone: (value: string) => void;
-  onIdentify: () => void;
-  onCopyPix: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <main className="checkout-fixed">
-      <div className="checkout-card">
-        <span className="checkout-logo"><b /> groupay</span>
-
-        {step === "identify" ? (
-          <>
-            <h1>{group.name}</h1>
-            <p className="checkout-sub">Identifique-se para ver suas cobranças.</p>
-            <label className="checkout-label" htmlFor="co-phone">Seu celular</label>
-            <div className="checkout-input">
-              <span className="placeholder">[ &nbsp;]</span>
-              <input id="co-phone" value={phone} onChange={(e) => onPhone(e.target.value)} placeholder="(11) 98812-4410" inputMode="tel" autoFocus />
-            </div>
-            <button className="solid full" onClick={onIdentify} disabled={phone.replace(/\D/g, "").length < 10}>Continuar</button>
-            <p className="checkout-hint"><Lock size={12} /> Seu número é usado apenas para identificar suas cobranças neste grupo.</p>
-          </>
-        ) : (
-          <>
-            <span className="checkout-check"><Check size={26} strokeWidth={3} /></span>
-            <h1>Olá, {participant.name}!</h1>
-            <p className="checkout-sub">Você tem <strong>{1}</strong> pendência em <strong>{group.name}</strong>.</p>
-            <div className="charge-row">
-              <span className="charge-info"><strong>{participant.name}</strong><small>{group.name} · Cobrança do mês</small></span>
-              <strong className="charge-amount">{formatMoney(amount)}</strong>
-            </div>
-            <label className="checkout-label" htmlFor="co-name">Seu nome completo</label>
-            <input id="co-name" className="checkout-input text" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Nome completo" />
-            <button className="solid full" onClick={onConfirm} disabled={!fullName.trim()}>Gerar PIX</button>
-            <p className="checkout-hint">O PIX será pago via chave do organizador.</p>
-
-            {pixKey && (
-              <div className="pix-key">
-                <span><small>Chave PIX</small><strong>{pixKey}</strong></span>
-                <button className="mini" onClick={onCopyPix}><Copy size={13} /> Copiar</button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </main>
-  );
-}
-
 function ManagedGroupView({
   group,
   participants,
@@ -576,7 +441,6 @@ function ManagedGroupView({
   onSettle,
   onCopyLink,
   onCopyMessage,
-  onOpenCheckout,
 }: {
   group: Group;
   participants: Participant[];
@@ -588,7 +452,6 @@ function ManagedGroupView({
   onSettle: (id: string) => void;
   onCopyLink: () => void;
   onCopyMessage: () => void;
-  onOpenCheckout: () => void;
 }) {
   const paid = charges.filter((c) => c.status === "paid");
   const pending = charges.filter((c) => c.status === "pending");
@@ -601,7 +464,6 @@ function ManagedGroupView({
         <div className="detail-btns">
           <button className="mini" onClick={onCopyLink}><Copy size={13} /> Copiar link</button>
           <button className="mini" onClick={onCopyMessage}><Copy size={13} /> Copiar mensagem</button>
-          <button className="mini primary" onClick={onOpenCheckout}><CreditCard size={13} /> Link de pagamento</button>
         </div>
       </section>
 
