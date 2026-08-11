@@ -6,12 +6,15 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
+  ClipboardPaste,
   CreditCard,
   Copy,
   LayoutDashboard,
   Menu,
+  Pencil,
   Plus,
   Settings,
+  Trash2,
   UserRound,
   Users,
   WalletCards,
@@ -34,6 +37,8 @@ import {
 } from "@/lib/mock-data";
 
 type ViewId = "overview" | "groups" | "charges" | "settings";
+
+type ImportRow = { id: string; name: string; include: boolean; phone: string; error: string };
 
 const navItems: { id: ViewId; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overview", label: "Visão Geral", icon: LayoutDashboard },
@@ -65,6 +70,23 @@ export default function GroupayDashboard() {
   const [settleError, setSettleError] = useState("");
   const [settleSaving, setSettleSaving] = useState(false);
 
+  // Grupo: editar nome / remover (sem rota real de backend ainda — mock local)
+  const [groupEditModal, setGroupEditModal] = useState(false);
+  const [groupEditName, setGroupEditName] = useState("");
+  const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false);
+
+  // Participante: modal de detalhe (excluir usa a API real; edição é só local por enquanto)
+  const [participantModal, setParticipantModal] = useState<null | { groupId: string; participantId: string }>(null);
+  const [participantEditForm, setParticipantEditForm] = useState({ name: "", phone: "" });
+  const [participantSaving, setParticipantSaving] = useState(false);
+  const [participantError, setParticipantError] = useState("");
+
+  // Importar lista de participantes (colar nomes -> mapear -> escolher -> telefone -> API real)
+  const [importModal, setImportModal] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [importSaving, setImportSaving] = useState(false);
+
   const periodCharges = useMemo(
     () => charges.filter((charge) => charge.competence === competence),
     [charges, competence],
@@ -93,6 +115,33 @@ export default function GroupayDashboard() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [settleModal]);
+
+  useEffect(() => {
+    if (!groupEditModal) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setGroupEditModal(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [groupEditModal]);
+
+  useEffect(() => {
+    if (!participantModal) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !participantSaving) setParticipantModal(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [participantModal, participantSaving]);
+
+  useEffect(() => {
+    if (!importModal) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !importSaving) setImportModal(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [importModal, importSaving]);
 
   function go(next: ViewId) {
     setView(next);
@@ -149,6 +198,158 @@ export default function GroupayDashboard() {
 
   function copyText(value: string, message: string) {
     navigator.clipboard?.writeText(value).then(() => flash(message));
+  }
+
+  // ---- Grupo: editar nome / remover ----
+  // Não existe rota PATCH/DELETE de grupo no backend ainda; as duas ações
+  // abaixo mexem só no estado local (mock) até essa rota existir.
+  function openGroupEditModal(group: Group) {
+    setGroupEditName(group.name);
+    setConfirmDeleteGroup(false);
+    setGroupEditModal(true);
+  }
+
+  function saveGroupName() {
+    if (!openGroup) return;
+    const name = groupEditName.trim();
+    if (!name) return;
+    // TODO(backend): falta PATCH /api/groups/:groupId — atualiza só o estado local.
+    setGroups((prev) => prev.map((g) => (g.id === openGroup.id ? { ...g, name } : g)));
+    setGroupEditModal(false);
+    flash(`Nome do grupo atualizado para "${name}"`);
+  }
+
+  function removeGroup() {
+    if (!openGroup) return;
+    // TODO(backend): falta DELETE /api/groups/:groupId — remove só do estado local.
+    const removedName = openGroup.name;
+    const removedId = openGroup.id;
+    setGroups((prev) => prev.filter((g) => g.id !== removedId));
+    setParticipants((prev) => prev.map((p) => ({ ...p, groupIds: p.groupIds.filter((id) => id !== removedId) })));
+    setCharges((prev) => prev.filter((c) => c.groupId !== removedId));
+    setGroupEditModal(false);
+    setOpenGroupId(null);
+    flash(`${removedName} removido`);
+  }
+
+  // ---- Participante: modal de detalhe ----
+  const participantModalPerson = participantModal
+    ? (participants.find((p) => p.id === participantModal.participantId) ?? null)
+    : null;
+
+  function openParticipantModal(groupId: string, participant: Participant) {
+    setParticipantModal({ groupId, participantId: participant.id });
+    setParticipantEditForm({ name: participant.name, phone: participant.phone });
+    setParticipantError("");
+  }
+
+  function saveParticipantEdit() {
+    if (!participantModalPerson) return;
+    const name = participantEditForm.name.trim();
+    const phone = participantEditForm.phone.trim();
+    if (!name || !phone) return;
+    // TODO(backend): falta uma rota PATCH de participante (ex: PATCH
+    // /api/participants/:id) — a edição fica só no estado local (mock) até
+    // essa rota existir no servidor.
+    setParticipants((prev) =>
+      prev.map((p) => (p.id === participantModalPerson.id ? { ...p, name, initials: name.slice(0, 2).toUpperCase(), phone } : p)),
+    );
+    flash("Dados atualizados (ainda não sincronizado com o backend)");
+  }
+
+  async function removeParticipantFromGroup() {
+    if (!participantModal || !participantModalPerson) return;
+    const { groupId, participantId } = participantModal;
+    setParticipantSaving(true);
+    setParticipantError("");
+    try {
+      await apiClient.removeParticipant(groupId, participantId);
+      setParticipants((prev) =>
+        prev.map((p) => (p.id === participantId ? { ...p, groupIds: p.groupIds.filter((id) => id !== groupId) } : p)),
+      );
+      setCharges((prev) => prev.filter((c) => !(c.participantId === participantId && c.groupId === groupId)));
+      const removedName = participantModalPerson.name;
+      setParticipantModal(null);
+      flash(`${removedName} removido do grupo`);
+    } catch (error) {
+      setParticipantError(error instanceof Error ? error.message : "Erro ao remover participante");
+    } finally {
+      setParticipantSaving(false);
+    }
+  }
+
+  // ---- Importar lista de participantes ----
+  function parseImportedName(rawLine: string): string {
+    return rawLine
+      .replace(/^\s*\d+\s*[-.)]\s*/, "") // "1. ", "4 - ", "5- "
+      .replace(/^\s*[-.)]\s*/, "") // "- " sem número
+      .trim();
+  }
+
+  function isValidBrPhone(value: string): boolean {
+    return /^\(\d{2}\) \d{9}$/.test(value.trim());
+  }
+
+  function analyzeImportText() {
+    const names = importText
+      .split("\n")
+      .map(parseImportedName)
+      .filter((name) => name.length > 0);
+    setImportRows(
+      names.map((name, index) => ({ id: `import-${index}-${Date.now()}`, name, include: true, phone: "", error: "" })),
+    );
+  }
+
+  function updateImportRow(id: string, patch: Partial<ImportRow>) {
+    setImportRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  }
+
+  async function confirmImport() {
+    if (!openGroup) return;
+    const groupId = openGroup.id;
+    setImportSaving(true);
+    const eligible = importRows.filter((row) => row.include);
+    const untouched = importRows.filter((row) => !row.include);
+    const failed: ImportRow[] = [];
+    let successCount = 0;
+
+    for (const row of eligible) {
+      const phone = row.phone.trim();
+      if (!isValidBrPhone(phone)) {
+        failed.push({ ...row, error: "Telefone inválido — use (XX) 999999999" });
+        continue;
+      }
+      try {
+        const created = (await apiClient.addParticipant(groupId, { name: row.name, phone })) as { id?: string } | null;
+        // A rota real hoje ignora o nome quando o participante é novo (ver
+        // comentário em src/lib/api-client.ts) — usamos o nome digitado
+        // aqui para a lista ficar correta enquanto isso não é corrigido no
+        // backend.
+        const id = created?.id ?? `local-${Date.now()}-${row.id}`;
+        setParticipants((prev) => [
+          ...prev,
+          { id, name: row.name, initials: row.name.slice(0, 2).toUpperCase(), phone, groupIds: [groupId] },
+        ]);
+        setCharges((prev) => [
+          ...prev,
+          { id: `${competence}:${id}:${groupId}`, groupId, participantId: id, competence, amount: openGroup.amount, status: "pending", source: null, paidAt: null },
+        ]);
+        successCount += 1;
+      } catch (error) {
+        failed.push({ ...row, error: error instanceof Error ? error.message : "Erro ao adicionar participante" });
+      }
+    }
+
+    setImportRows([...untouched, ...failed]);
+    setImportSaving(false);
+    if (successCount > 0) {
+      flash(`${successCount} participante${successCount > 1 ? "s" : ""} adicionado${successCount > 1 ? "s" : ""} ao grupo`);
+    }
+    if (failed.length === 0) {
+      setImportModal(false);
+      setImportText("");
+      setImportRows([]);
+    }
   }
 
   function memberLink(group: Group) {
@@ -291,6 +492,111 @@ export default function GroupayDashboard() {
         </div>
       )}
 
+      {groupEditModal && openGroup && (
+        <div className="backdrop" onMouseDown={() => setGroupEditModal(false)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Editar grupo" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-top"><h2>Editar grupo</h2><button className="ghost-icon" onClick={() => setGroupEditModal(false)} aria-label="Fechar"><X size={18} /></button></div>
+            <label htmlFor="ge-name">Nome do grupo</label>
+            <input id="ge-name" value={groupEditName} onChange={(e) => setGroupEditName(e.target.value)} autoFocus />
+            <div className="modal-actions">
+              <button className="mini" onClick={() => setGroupEditModal(false)}>Cancelar</button>
+              <button className="solid" onClick={saveGroupName} disabled={!groupEditName.trim()}>Salvar nome</button>
+            </div>
+
+            {!confirmDeleteGroup ? (
+              <button className="mini danger full" onClick={() => setConfirmDeleteGroup(true)}><Trash2 size={13} /> Remover grupo</button>
+            ) : (
+              <div className="danger-confirm">
+                <p className="modal-hint">Remover &quot;{openGroup.name}&quot; também desvincula todos os participantes deste grupo (mock local — ainda não sincroniza com o backend).</p>
+                <div className="modal-actions">
+                  <button className="mini" onClick={() => setConfirmDeleteGroup(false)}>Cancelar</button>
+                  <button className="solid danger" onClick={removeGroup}>Confirmar remoção</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {participantModal && participantModalPerson && (
+        <div className="backdrop" onMouseDown={() => !participantSaving && setParticipantModal(null)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Participante" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-top"><h2>{participantModalPerson.name}</h2><button className="ghost-icon" onClick={() => setParticipantModal(null)} aria-label="Fechar" disabled={participantSaving}><X size={18} /></button></div>
+
+            <label htmlFor="pe-name">Nome</label>
+            <input id="pe-name" value={participantEditForm.name} onChange={(e) => setParticipantEditForm({ ...participantEditForm, name: e.target.value })} />
+            <label htmlFor="pe-phone">Celular</label>
+            <input id="pe-phone" value={participantEditForm.phone} onChange={(e) => setParticipantEditForm({ ...participantEditForm, phone: e.target.value })} inputMode="tel" />
+            <p className="modal-hint">Edição ainda não é salva no servidor — falta a rota PATCH de participante no backend. Por enquanto fica só neste navegador.</p>
+            <button className="mini full" onClick={saveParticipantEdit} disabled={!participantEditForm.name.trim() || !participantEditForm.phone.trim()}>Salvar (local)</button>
+
+            {participantError && <p className="modal-error">{participantError}</p>}
+            <div className="danger-confirm">
+              <p className="modal-hint">Excluir remove {participantModalPerson.name} deste grupo. A pessoa continua nos demais grupos, se houver.</p>
+              <button className="solid danger full" onClick={removeParticipantFromGroup} disabled={participantSaving}>
+                <Trash2 size={13} /> {participantSaving ? "Removendo…" : "Excluir do grupo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {importModal && openGroup && (
+        <div className="backdrop" onMouseDown={() => !importSaving && setImportModal(false)}>
+          <div className="modal wide" role="dialog" aria-modal="true" aria-label="Importar participantes" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-top"><h2>Importar participantes</h2><button className="ghost-icon" onClick={() => setImportModal(false)} aria-label="Fechar" disabled={importSaving}><X size={18} /></button></div>
+
+            <label htmlFor="import-text">Cole a lista de nomes (um por linha)</label>
+            <textarea
+              id="import-text"
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder={"1. João\n2. Felipe\n3. Alfredo\n4 - Marcelo\n5- Otavio\n- Matheus"}
+              rows={5}
+              disabled={importSaving}
+            />
+            <button className="mini full" onClick={analyzeImportText} disabled={!importText.trim() || importSaving}>Analisar lista</button>
+
+            {importRows.length > 0 && (
+              <ul className="import-list">
+                {importRows.map((row) => (
+                  <li key={row.id} className="import-row">
+                    <input
+                      type="checkbox"
+                      checked={row.include}
+                      onChange={(e) => updateImportRow(row.id, { include: e.target.checked })}
+                      aria-label={`Incluir ${row.name}`}
+                      disabled={importSaving}
+                    />
+                    <span className="import-name">{row.name}</span>
+                    {row.include && (
+                      <input
+                        className="import-phone"
+                        value={row.phone}
+                        onChange={(e) => updateImportRow(row.id, { phone: e.target.value, error: "" })}
+                        placeholder="(11) 998124410"
+                        inputMode="tel"
+                        disabled={importSaving}
+                      />
+                    )}
+                    {row.error && <small className="import-error">{row.error}</small>}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {importRows.length > 0 && (
+              <div className="modal-actions">
+                <button className="mini" onClick={() => setImportModal(false)} disabled={importSaving}>Fechar</button>
+                <button className="solid" onClick={confirmImport} disabled={importSaving || !importRows.some((r) => r.include)}>
+                  {importSaving ? "Importando…" : "Importar selecionados"}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <aside className={`side ${menuOpen ? "open" : ""}`}>
         <div className="side-top">
           <span className="logo"><b /> groupay</span>
@@ -329,9 +635,12 @@ export default function GroupayDashboard() {
               nameOf={nameOf}
               onBack={() => setOpenGroupId(null)}
               onAddMember={() => setMemberModal(true)}
+              onImportMembers={() => setImportModal(true)}
               onSettle={openSettleModal}
               onCopyLink={() => copyText(memberLink(openGroup), `Link de ${openGroup.name} copiado`)}
               onCopyMessage={() => createChargeMessage(openGroup)}
+              onEditGroup={() => openGroupEditModal(openGroup)}
+              onOpenParticipant={(participant) => openParticipantModal(openGroup.id, participant)}
             />
           ) : view === "overview" ? (
             <>
@@ -438,9 +747,12 @@ function ManagedGroupView({
   nameOf,
   onBack,
   onAddMember,
+  onImportMembers,
   onSettle,
   onCopyLink,
   onCopyMessage,
+  onEditGroup,
+  onOpenParticipant,
 }: {
   group: Group;
   participants: Participant[];
@@ -449,9 +761,12 @@ function ManagedGroupView({
   nameOf: (id: string) => string;
   onBack: () => void;
   onAddMember: () => void;
+  onImportMembers: () => void;
   onSettle: (id: string) => void;
   onCopyLink: () => void;
   onCopyMessage: () => void;
+  onEditGroup: () => void;
+  onOpenParticipant: (participant: Participant) => void;
 }) {
   const paid = charges.filter((c) => c.status === "paid");
   const pending = charges.filter((c) => c.status === "pending");
@@ -464,6 +779,7 @@ function ManagedGroupView({
         <div className="detail-btns">
           <button className="mini" onClick={onCopyLink}><Copy size={13} /> Copiar link</button>
           <button className="mini" onClick={onCopyMessage}><Copy size={13} /> Copiar mensagem</button>
+          <button className="mini" onClick={onEditGroup}><Pencil size={13} /> Editar grupo</button>
         </div>
       </section>
 
@@ -473,7 +789,13 @@ function ManagedGroupView({
       </section>
 
       <section className="block">
-        <div className="block-top"><h2>Participantes ({participants.length})</h2><button className="solid" onClick={onAddMember}><Plus size={15} /> Adicionar</button></div>
+        <div className="block-top">
+          <h2>Participantes ({participants.length})</h2>
+          <div className="row-btns">
+            <button className="mini" onClick={onImportMembers}><ClipboardPaste size={13} /> Importar lista</button>
+            <button className="solid" onClick={onAddMember}><Plus size={15} /> Adicionar</button>
+          </div>
+        </div>
         <ul className="list">
           {participants.map((person) => {
             const charge = charges.find((c) => c.participantId === person.id);
@@ -481,8 +803,10 @@ function ManagedGroupView({
             return (
               <li key={person.id}>
                 <div className="row static">
-                  <span className={status === "paid" ? "dot green-dot" : "dot red-dot"} />
-                  <span className="row-main"><strong>{person.name}</strong><small>{person.phone} · {status === "paid" ? `Pago em ${charge?.paidAt ? formatDate(charge.paidAt) : ""}` : "Aguardando pagamento"}</small></span>
+                  <button className="row-click" onClick={() => onOpenParticipant(person)}>
+                    <span className={status === "paid" ? "dot green-dot" : "dot red-dot"} />
+                    <span className="row-main"><strong>{person.name}</strong><small>{person.phone} · {status === "paid" ? `Pago em ${charge?.paidAt ? formatDate(charge.paidAt) : ""}` : "Aguardando pagamento"}</small></span>
+                  </button>
                   <strong className="value">{formatMoney(charge?.amount ?? 0)}</strong>
                   {status === "pending" && <button className="mini" onClick={() => onSettle(charge!.id)}>Baixa manual</button>}
                 </div>

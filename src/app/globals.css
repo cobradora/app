@@ -110,6 +110,7 @@ button.row:hover { background: #f5f7f7; }
 .toast span { width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: #588169; color: #fff; }
 .backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(30,34,36,.34); }
 .modal { width: min(390px, 100%); padding: 20px; border-radius: 12px; background: #fff; box-shadow: 0 20px 50px rgba(20,26,29,.2); }
+.modal.wide { width: min(480px, 100%); }
 .modal-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .modal h2 { font-size: 17px; }
 .modal label { display: block; margin: 12px 0 6px; font-size: 11px; font-weight: 650; }
@@ -117,8 +118,29 @@ button.row:hover { background: #f5f7f7; }
 .modal select { width: 100%; height: 38px; padding: 0 11px; border: 1px solid var(--line-2); border-radius: 7px; background: #fafbfb; font-size: 13px; }
 .modal textarea { width: 100%; min-height: 72px; padding: 9px 11px; border: 1px solid var(--line-2); border-radius: 7px; background: #fafbfb; font-size: 13px; font: inherit; resize: vertical; }
 .modal-error { margin: 10px 0 0; color: #b3453f; font-size: 11.5px; }
+.modal-hint { margin: 10px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
 .modal-actions .mini, .modal-actions .solid { flex: 1; height: 38px; }
+
+.mini.full { width: 100%; justify-content: center; margin-top: 16px; }
+.mini.danger { background: #fff; border-color: #e3b6b3; color: #b3453f; }
+.mini.danger:hover { background: #fbecec; }
+.solid.danger { background: #b3453f; }
+.solid.danger:hover { background: #90352f; }
+.danger-confirm { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--line-2); }
+
+/* linha "badge" clicavel dentro de uma .row (ex: participante do grupo) */
+.row-click { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; text-align: left; }
+.row-click:hover .row-main strong { text-decoration: underline; }
+
+/* importar lista de participantes */
+.import-list { max-height: 280px; margin-top: 10px; padding-right: 2px; overflow-y: auto; }
+.import-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 0; }
+.import-row + .import-row { border-top: 1px solid #eef0f0; }
+.import-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: #2a2f31; }
+.import-name { flex: 1; min-width: 90px; font-size: 12.5px; }
+.import-phone { width: 168px; height: 32px; padding: 0 9px; border: 1px solid var(--line-2); border-radius: 7px; background: #fafbfb; font-size: 12px; }
+.import-error { flex-basis: 100%; margin: 0; color: #b3453f; font-size: 10.5px; }
 
 .detail-btns { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .mini.primary { background: #274a3b; border-color: #274a3b; color: #fff; }
