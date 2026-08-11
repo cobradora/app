@@ -39,6 +39,11 @@ export type ManualSettlementInput = {
   observation?: string;
 };
 
+export type AddParticipantInput = {
+  name: string;
+  phone: string;
+};
+
 export type CheckoutResult = {
   checkoutSessionId: string;
   checkoutUrl: string;
@@ -75,6 +80,28 @@ export const apiClient = {
     await request<{ ok: true }>(`/api/charges/${chargeId}/manual-settlement`, {
       method: "POST",
       body: JSON.stringify(input),
+    });
+  },
+
+  /**
+   * POST /api/groups/:groupId/participants — cria (ou reaproveita, por
+   * telefone) o participante e ja o vincula ao grupo em uma unica chamada.
+   * Nota: o servico hoje ignora `name` quando o participante e novo (ver
+   * findOrCreateParticipantByPhone em src/services/participants.ts, que
+   * sempre grava name: "") — isso e um gap do backend, nao deste cliente.
+   */
+  async addParticipant(groupId: string, input: AddParticipantInput) {
+    const data = await request<{ participant: unknown }>(`/api/groups/${groupId}/participants`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    return data.participant;
+  },
+
+  /** DELETE /api/groups/:groupId/participants/:participantId — desvincula (soft) o participante do grupo. */
+  async removeParticipant(groupId: string, participantId: string) {
+    await request<{ ok: true }>(`/api/groups/${groupId}/participants/${participantId}`, {
+      method: "DELETE",
     });
   },
 
