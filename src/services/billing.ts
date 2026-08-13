@@ -13,6 +13,12 @@ export async function generateBillingPeriod(groupId: string, referenceMonth: str
   const [group] = await db.select().from(groups).where(eq(groups.id, groupId));
   if (!group) throw new Error("Grupo não encontrado");
 
+  const [existingPeriod] = await db
+    .select()
+    .from(billingPeriods)
+    .where(and(eq(billingPeriods.groupId, groupId), eq(billingPeriods.referenceMonth, referenceMonth)));
+  if (existingPeriod) throw new Error("Já existe uma cobrança gerada para este mês");
+
   return db.transaction(async (tx) => {
     const [period] = await tx
       .insert(billingPeriods)

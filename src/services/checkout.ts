@@ -3,14 +3,9 @@ import { groups, participants, charges, checkoutSessions, checkoutItems, gateway
 import { and, eq, inArray } from "drizzle-orm";
 import { randomBytes, createHash } from "node:crypto";
 import { getPaymentsAdapter } from "@/payments";
+import { normalizePhoneBR } from "@/lib/phone";
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
-
-function normalizePhoneBR(raw: string): string {
-  const digits = raw.replace(/\D/g, "");
-  const withoutCountry = digits.startsWith("55") && digits.length > 11 ? digits.slice(2) : digits;
-  return `+55${withoutCountry}`;
-}
 
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");

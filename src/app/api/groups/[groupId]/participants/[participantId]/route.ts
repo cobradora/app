@@ -15,6 +15,9 @@ export async function DELETE(
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
-    throw err;
+    return NextResponse.json(
+      { error: "participant_has_outstanding_charges", message: (err as Error).message },
+      { status: 409 },
+    );
   }
 }

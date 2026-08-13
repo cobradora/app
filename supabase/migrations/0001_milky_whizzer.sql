@@ -1,0 +1,1 @@
+ALTER TABLE "checkout_sessions" ADD COLUMN "webhook_token_hash" varchar(64);

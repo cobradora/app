@@ -10,6 +10,7 @@ import {
   CreditCard,
   Copy,
   LayoutDashboard,
+  LogOut,
   Menu,
   Pencil,
   Plus,
@@ -21,24 +22,98 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { apiClient, type ManualSettlementInput } from "@/lib/api-client";
+import { useRouter } from "next/navigation";
+import { apiClient, type ManualSettlementInput, type GroupCharge, type OrgCharge, type GroupParticipant, type GatewayAccount } from "@/lib/api-client";
 import {
   type Charge,
   type Group,
   type OrgSettings,
   type Participant,
-  competenceLabels,
-  competences,
   formatDate,
   formatMoney,
-  groups as seedGroups,
-  initialCharges,
-  participants as seedParticipants,
 } from "@/lib/mock-data";
 
 type ViewId = "overview" | "groups" | "charges" | "settings";
 
 type ImportRow = { id: string; name: string; include: boolean; phone: string; error: string };
+
+const GROUP_COLORS = ["#64798f", "#5f8271", "#93805f", "#7a6b9c", "#9c6b6b"];
+
+type ApiGroup = {
+  id: string;
+  name: string;
+  publicSlug: string;
+  billingDay: number;
+  defaultAmount: number;
+  status: "active" | "archived";
+};
+
+function mapApiGroup(raw: unknown, index: number): Group {
+  const g = raw as ApiGroup;
+  return {
+    id: g.id,
+    name: g.name,
+    sport: "",
+    initials: g.name.slice(0, 2).toUpperCase(),
+    color: GROUP_COLORS[index % GROUP_COLORS.length],
+    amount: g.defaultAmount / 100,
+    dueDay: g.billingDay,
+    publicSlug: g.publicSlug,
+    status: g.status,
+  };
+}
+
+const RESOLVED_CHARGE_STATUSES = new Set(["paid", "manually_paid", "canceled", "refunded"]);
+
+function mapRealCharge(row: GroupCharge, groupId: string): Charge {
+  return {
+    id: row.chargeId,
+    groupId,
+    participantId: row.participantId,
+    participantName: row.participantName,
+    competence: row.referenceMonth,
+    amount: row.totalAmount / 100,
+    status: RESOLVED_CHARGE_STATUSES.has(row.status) ? "paid" : "pending",
+    source: row.status === "manually_paid" ? "manual" : row.status === "paid" ? "checkout" : null,
+    paidAt: null,
+  };
+}
+
+function mapOrgCharge(row: OrgCharge): Charge {
+  return mapRealCharge(row, row.groupId);
+}
+
+function mapGroupParticipant(row: GroupParticipant, groupId: string): Participant {
+  return {
+    id: row.participantId,
+    name: row.name,
+    initials: (row.name || "?").slice(0, 2).toUpperCase(),
+    phone: row.phoneDisplay,
+    groupIds: [groupId],
+  };
+}
+
+const MONTH_NAMES_PT = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+];
+
+function monthLabel(referenceMonth: string): string {
+  const [year, month] = referenceMonth.split("-").map(Number);
+  return `${MONTH_NAMES_PT[month - 1]} ${year}`;
+}
+
+function recentMonths(count: number): string[] {
+  const now = new Date();
+  const months: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return months;
+}
+
+const RECENT_MONTHS = recentMonths(5);
 
 const navItems: { id: ViewId; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overview", label: "Visão Geral", icon: LayoutDashboard },
@@ -47,20 +122,30 @@ const navItems: { id: ViewId; label: string; icon: typeof LayoutDashboard }[] = 
 ];
 
 export default function GroupayDashboard() {
+  const router = useRouter();
   const [view, setView] = useState<ViewId>("overview");
-  const [groups, setGroups] = useState<Group[]>(seedGroups);
-  const [participants, setParticipants] = useState<Participant[]>(seedParticipants);
-  const [charges, setCharges] = useState<Charge[]>(initialCharges);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [charges, setCharges] = useState<Charge[]>([]);
   const [settings, setSettings] = useState<OrgSettings>({ pixKey: "", pixName: "" });
-  const [competence, setCompetence] = useState(competences[0]);
+  const [competence, setCompetence] = useState(RECENT_MONTHS[0]);
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [pixModal, setPixModal] = useState(false);
+  const [gatewayAccount, setGatewayAccount] = useState<GatewayAccount | null>(null);
+  const [gatewayModal, setGatewayModal] = useState(false);
+  const [gatewayInput, setGatewayInput] = useState("");
+  const [gatewaySaving, setGatewaySaving] = useState(false);
+  const [gatewayError, setGatewayError] = useState("");
   const [memberModal, setMemberModal] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [form, setForm] = useState({ name: "", sport: "", amount: "" });
   const [memberForm, setMemberForm] = useState({ name: "", phone: "" });
+  const [memberSaving, setMemberSaving] = useState(false);
+  const [memberError, setMemberError] = useState("");
   const [pixInput, setPixInput] = useState("");
 
   // Manual settlement modal state
@@ -70,12 +155,15 @@ export default function GroupayDashboard() {
   const [settleError, setSettleError] = useState("");
   const [settleSaving, setSettleSaving] = useState(false);
 
-  // Grupo: editar nome / remover (sem rota real de backend ainda — mock local)
+  // Grupo: editar nome / arquivar
   const [groupEditModal, setGroupEditModal] = useState(false);
   const [groupEditName, setGroupEditName] = useState("");
   const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false);
+  const [groupSaving, setGroupSaving] = useState(false);
+  const [groupError, setGroupError] = useState("");
+  const [billingSaving, setBillingSaving] = useState(false);
 
-  // Participante: modal de detalhe (excluir usa a API real; edição é só local por enquanto)
+  // Participante: modal de detalhe (excluir e editar usam a API real)
   const [participantModal, setParticipantModal] = useState<null | { groupId: string; participantId: string }>(null);
   const [participantEditForm, setParticipantEditForm] = useState({ name: "", phone: "" });
   const [participantSaving, setParticipantSaving] = useState(false);
@@ -100,12 +188,187 @@ export default function GroupayDashboard() {
   }, [periodCharges]);
 
   const pendingTotal = charges.filter((c) => c.status === "pending").length;
+  const activeGroups = useMemo(() => groups.filter((g) => g.status !== "archived"), [groups]);
   const openGroup = groups.find((group) => group.id === openGroupId) ?? null;
 
   function flash(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2400);
   }
+
+  function mergeCharges(mapped: Charge[]) {
+    setCharges((prev) => {
+      const map = new Map(prev.map((c) => [c.id, c]));
+      for (const charge of mapped) map.set(charge.id, charge);
+      return Array.from(map.values());
+    });
+  }
+
+  function upsertParticipantInMap(map: Map<string, Participant>, person: Participant, groupId: string) {
+    const existing = map.get(person.id);
+    map.set(
+      person.id,
+      existing
+        ? { ...existing, name: person.name, initials: person.initials, phone: person.phone, groupIds: Array.from(new Set([...existing.groupIds, groupId])) }
+        : person,
+    );
+  }
+
+  // Faz upsert de um unico participante recem adicionado a `groupId` — soma
+  // esse grupo aos `groupIds` de quem ja e conhecido (pode estar em outros
+  // grupos), sem mexer em mais ninguem.
+  function upsertParticipant(person: Participant, groupId: string) {
+    setParticipants((prev) => {
+      const map = new Map(prev.map((p) => [p.id, p]));
+      upsertParticipantInMap(map, person, groupId);
+      return Array.from(map.values());
+    });
+  }
+
+  // Reconcilia a lista de participantes de `groupId` com uma busca completa
+  // e autoritativa (todos os participantes ativos daquele grupo agora): tira
+  // `groupId` de quem nao veio mais na lista (saiu do grupo desde a ultima
+  // busca), sem apagar o participante por completo caso ele ainda pertenca a
+  // outro grupo.
+  function reconcileGroupParticipants(mapped: Participant[], groupId: string) {
+    setParticipants((prev) => {
+      const map = new Map(prev.map((p) => [p.id, p]));
+      const fetchedIds = new Set(mapped.map((p) => p.id));
+      for (const [id, existing] of map) {
+        if (existing.groupIds.includes(groupId) && !fetchedIds.has(id)) {
+          map.set(id, { ...existing, groupIds: existing.groupIds.filter((g) => g !== groupId) });
+        }
+      }
+      for (const person of mapped) upsertParticipantInMap(map, person, groupId);
+      return Array.from(map.values());
+    });
+  }
+
+  async function fetchGroupCharges(groupId: string) {
+    try {
+      const rows = await apiClient.listGroupCharges(groupId);
+      mergeCharges(rows.map((row) => mapRealCharge(row, groupId)));
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Erro ao carregar cobranças do grupo");
+    }
+  }
+
+  function openGatewayModal() {
+    setGatewayInput(gatewayAccount?.externalAccountId ?? "");
+    setGatewayError("");
+    setGatewayModal(true);
+  }
+
+  async function saveGatewayHandle() {
+    const handle = gatewayInput.trim();
+    if (!handle) return;
+    setGatewaySaving(true);
+    setGatewayError("");
+    try {
+      const account = await apiClient.setInfinitePayHandle(handle);
+      setGatewayAccount(account);
+      setGatewayModal(false);
+      flash("Conta InfinitePay atualizada");
+    } catch (error) {
+      setGatewayError(error instanceof Error ? error.message : "Erro ao salvar a conta InfinitePay");
+    } finally {
+      setGatewaySaving(false);
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await apiClient.logout();
+    } finally {
+      router.push("/login");
+      router.refresh();
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .listGroups()
+      .then((raw) => {
+        if (cancelled) return;
+        setGroups(raw.map((g, index) => mapApiGroup(g, index)));
+      })
+      .catch(() => {
+        if (!cancelled) flash("Não foi possível carregar os grupos do servidor — verifique se sua sessão ainda é válida");
+      })
+      .finally(() => {
+        if (!cancelled) setGroupsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getInfinitePayAccount()
+      .then((account) => {
+        if (!cancelled) setGatewayAccount(account);
+      })
+      .catch(() => {
+        if (!cancelled) flash("Não foi possível carregar a conta de pagamento");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!openGroupId) return;
+    let cancelled = false;
+    apiClient
+      .listGroupCharges(openGroupId)
+      .then((rows) => {
+        if (cancelled) return;
+        mergeCharges(rows.map((row) => mapRealCharge(row, openGroupId)));
+      })
+      .catch(() => {
+        if (!cancelled) flash("Erro ao carregar cobranças do grupo");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openGroupId]);
+
+  useEffect(() => {
+    if (!openGroupId) return;
+    let cancelled = false;
+    apiClient
+      .listGroupParticipants(openGroupId)
+      .then((rows) => {
+        if (cancelled) return;
+        reconcileGroupParticipants(rows.map((row) => mapGroupParticipant(row, openGroupId)), openGroupId);
+      })
+      .catch(() => {
+        if (!cancelled) flash("Erro ao carregar participantes do grupo");
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openGroupId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .listOrganizationCharges(competence)
+      .then((rows) => {
+        if (cancelled) return;
+        mergeCharges(rows.map(mapOrgCharge));
+      })
+      .catch(() => {
+        if (!cancelled) flash("Erro ao carregar cobranças do mês");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [competence]);
 
   useEffect(() => {
     if (!settleModal) return;
@@ -180,10 +443,11 @@ export default function GroupayDashboard() {
         paymentMethod: settleMethod,
         observation: settleObservation.trim() || undefined,
       });
+      const today = new Date().toISOString().slice(0, 10);
       setCharges((prev) =>
         prev.map((charge) =>
           charge.id === chargeId && charge.status === "pending"
-            ? { ...charge, status: "paid", source: "manual", paidAt: `${charge.competence}-15` }
+            ? { ...charge, status: "paid", source: "manual", paidAt: today }
             : charge,
         ),
       );
@@ -200,36 +464,67 @@ export default function GroupayDashboard() {
     navigator.clipboard?.writeText(value).then(() => flash(message));
   }
 
-  // ---- Grupo: editar nome / remover ----
-  // Não existe rota PATCH/DELETE de grupo no backend ainda; as duas ações
-  // abaixo mexem só no estado local (mock) até essa rota existir.
+  // ---- Grupo: editar nome / arquivar ----
   function openGroupEditModal(group: Group) {
     setGroupEditName(group.name);
     setConfirmDeleteGroup(false);
+    setGroupError("");
     setGroupEditModal(true);
   }
 
-  function saveGroupName() {
+  async function saveGroupName() {
     if (!openGroup) return;
     const name = groupEditName.trim();
     if (!name) return;
-    // TODO(backend): falta PATCH /api/groups/:groupId — atualiza só o estado local.
-    setGroups((prev) => prev.map((g) => (g.id === openGroup.id ? { ...g, name } : g)));
-    setGroupEditModal(false);
-    flash(`Nome do grupo atualizado para "${name}"`);
+    setGroupSaving(true);
+    setGroupError("");
+    try {
+      await apiClient.updateGroup(openGroup.id, { name });
+      setGroups((prev) => prev.map((g) => (g.id === openGroup.id ? { ...g, name } : g)));
+      setGroupEditModal(false);
+      flash(`Nome do grupo atualizado para "${name}"`);
+    } catch (error) {
+      setGroupError(error instanceof Error ? error.message : "Erro ao atualizar grupo");
+    } finally {
+      setGroupSaving(false);
+    }
   }
 
-  function removeGroup() {
+  async function removeGroup() {
     if (!openGroup) return;
-    // TODO(backend): falta DELETE /api/groups/:groupId — remove só do estado local.
-    const removedName = openGroup.name;
-    const removedId = openGroup.id;
-    setGroups((prev) => prev.filter((g) => g.id !== removedId));
-    setParticipants((prev) => prev.map((p) => ({ ...p, groupIds: p.groupIds.filter((id) => id !== removedId) })));
-    setCharges((prev) => prev.filter((c) => c.groupId !== removedId));
-    setGroupEditModal(false);
-    setOpenGroupId(null);
-    flash(`${removedName} removido`);
+    setGroupSaving(true);
+    setGroupError("");
+    try {
+      await apiClient.deleteGroup(openGroup.id);
+      const removedName = openGroup.name;
+      const removedId = openGroup.id;
+      setGroups((prev) => prev.map((g) => (g.id === removedId ? { ...g, status: "archived" } : g)));
+      setParticipants((prev) => prev.map((p) => ({ ...p, groupIds: p.groupIds.filter((id) => id !== removedId) })));
+      setCharges((prev) => prev.filter((c) => c.groupId !== removedId));
+      setGroupEditModal(false);
+      setOpenGroupId(null);
+      flash(`${removedName} arquivado`);
+    } catch (error) {
+      setGroupError(error instanceof Error ? error.message : "Erro ao arquivar grupo");
+    } finally {
+      setGroupSaving(false);
+    }
+  }
+
+  async function generateBillingForOpenGroup() {
+    if (!openGroup) return;
+    const now = new Date();
+    const referenceMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    setBillingSaving(true);
+    try {
+      await apiClient.generateBillingPeriod(openGroup.id, referenceMonth);
+      await fetchGroupCharges(openGroup.id);
+      flash(`Cobrança de ${referenceMonth} gerada`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Erro ao gerar cobrança");
+    } finally {
+      setBillingSaving(false);
+    }
   }
 
   // ---- Participante: modal de detalhe ----
@@ -243,18 +538,24 @@ export default function GroupayDashboard() {
     setParticipantError("");
   }
 
-  function saveParticipantEdit() {
+  async function saveParticipantEdit() {
     if (!participantModalPerson) return;
     const name = participantEditForm.name.trim();
     const phone = participantEditForm.phone.trim();
     if (!name || !phone) return;
-    // TODO(backend): falta uma rota PATCH de participante (ex: PATCH
-    // /api/participants/:id) — a edição fica só no estado local (mock) até
-    // essa rota existir no servidor.
-    setParticipants((prev) =>
-      prev.map((p) => (p.id === participantModalPerson.id ? { ...p, name, initials: name.slice(0, 2).toUpperCase(), phone } : p)),
-    );
-    flash("Dados atualizados (ainda não sincronizado com o backend)");
+    setParticipantSaving(true);
+    setParticipantError("");
+    try {
+      await apiClient.updateParticipant(participantModalPerson.id, { name, phone });
+      setParticipants((prev) =>
+        prev.map((p) => (p.id === participantModalPerson.id ? { ...p, name, initials: name.slice(0, 2).toUpperCase(), phone } : p)),
+      );
+      flash("Dados do participante atualizados");
+    } catch (error) {
+      setParticipantError(error instanceof Error ? error.message : "Erro ao atualizar participante");
+    } finally {
+      setParticipantSaving(false);
+    }
   }
 
   async function removeParticipantFromGroup() {
@@ -326,14 +627,7 @@ export default function GroupayDashboard() {
         // aqui para a lista ficar correta enquanto isso não é corrigido no
         // backend.
         const id = created?.id ?? `local-${Date.now()}-${row.id}`;
-        setParticipants((prev) => [
-          ...prev,
-          { id, name: row.name, initials: row.name.slice(0, 2).toUpperCase(), phone, groupIds: [groupId] },
-        ]);
-        setCharges((prev) => [
-          ...prev,
-          { id: `${competence}:${id}:${groupId}`, groupId, participantId: id, competence, amount: openGroup.amount, status: "pending", source: null, paidAt: null },
-        ]);
+        upsertParticipant({ id, name: row.name, initials: row.name.slice(0, 2).toUpperCase(), phone, groupIds: [groupId] }, groupId);
         successCount += 1;
       } catch (error) {
         failed.push({ ...row, error: error instanceof Error ? error.message : "Erro ao adicionar participante" });
@@ -353,7 +647,8 @@ export default function GroupayDashboard() {
   }
 
   function memberLink(group: Group) {
-    return `https://groupay.com.br/p/${group.id}`;
+    const base = typeof window !== "undefined" ? window.location.origin : "";
+    return `${base}/g/${group.publicSlug}`;
   }
 
   function buildChargeMessage(groupId: string, competenceKey: string): string {
@@ -370,7 +665,7 @@ export default function GroupayDashboard() {
     return [
       `Olá, equipe do *${group.name}*! 🏐`,
       ``,
-      `Segue o status dos pagamentos de ${competenceLabels[competenceKey]}:`,
+      `Segue o status dos pagamentos de ${monthLabel(competenceKey)}:`,
       ``,
       ...lines,
       ``,
@@ -381,32 +676,49 @@ export default function GroupayDashboard() {
     ].join("\n");
   }
 
-  function addMember(groupId: string) {
+  async function addMember(groupId: string) {
     const name = memberForm.name.trim();
     const phone = memberForm.phone.trim();
     if (!name || !phone) return;
-    const id = `m-${Date.now()}`;
-    setParticipants((prev) => [...prev, { id, name, initials: name.slice(0, 2).toUpperCase(), phone, groupIds: [groupId] }]);
-    setCharges((prev) => [
-      ...prev,
-      { id: `${competence}:${id}:${groupId}`, groupId, participantId: id, competence, amount: groupOf(groupId)?.amount ?? 0, status: "pending", source: null, paidAt: null },
-    ]);
-    setMemberModal(false);
-    setMemberForm({ name: "", phone: "" });
-    flash(`${name} adicionado ao ${groupOf(groupId)?.name}`);
+    setMemberSaving(true);
+    setMemberError("");
+    try {
+      const created = (await apiClient.addParticipant(groupId, { name, phone })) as { id?: string } | null;
+      const id = created?.id ?? `local-${Date.now()}`;
+      upsertParticipant({ id, name, initials: name.slice(0, 2).toUpperCase(), phone, groupIds: [groupId] }, groupId);
+      setMemberModal(false);
+      setMemberForm({ name: "", phone: "" });
+      flash(`${name} adicionado ao ${groupOf(groupId)?.name}`);
+    } catch (error) {
+      setMemberError(error instanceof Error ? error.message : "Erro ao adicionar participante");
+    } finally {
+      setMemberSaving(false);
+    }
   }
 
-  function createGroup() {
+  async function createGroup() {
     const name = form.name.trim();
     if (!name) return;
-    const id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${groups.length + 1}`;
-    const group: Group = { id, name, sport: form.sport.trim() || "Grupo", initials: name.slice(0, 2).toUpperCase(), color: "#6c7a80", amount: Number(form.amount) || 0, dueDay: 10 };
-    setGroups((prev) => [...prev, group]);
-    setModalOpen(false);
-    setForm({ name: "", sport: "", amount: "" });
-    setOpenGroupId(id);
-    setView("groups");
-    flash(`${name} criado`);
+    setCreatingGroup(true);
+    try {
+      const created = (await apiClient.createGroup({
+        name,
+        sport: form.sport.trim() || undefined,
+        billingDay: 10,
+        defaultAmount: Math.round((Number(form.amount) || 0) * 100),
+      })) as ApiGroup;
+      const group = mapApiGroup(created, groups.length);
+      setGroups((prev) => [...prev, group]);
+      setModalOpen(false);
+      setForm({ name: "", sport: "", amount: "" });
+      setOpenGroupId(group.id);
+      setView("groups");
+      flash(`${name} criado`);
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Erro ao criar grupo");
+    } finally {
+      setCreatingGroup(false);
+    }
   }
 
   function createChargeMessage(group: Group) {
@@ -431,15 +743,39 @@ export default function GroupayDashboard() {
         </div>
       )}
 
+      {gatewayModal && (
+        <div className="backdrop" onMouseDown={() => !gatewaySaving && setGatewayModal(false)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Conta InfinitePay" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="modal-top"><h2>Conta InfinitePay</h2><button className="ghost-icon" onClick={() => setGatewayModal(false)} aria-label="Fechar" disabled={gatewaySaving}><X size={18} /></button></div>
+            <label htmlFor="gateway-handle">InfiniteTag (sem o caractere $)</label>
+            <input
+              id="gateway-handle"
+              value={gatewayInput}
+              onChange={(e) => setGatewayInput(e.target.value)}
+              placeholder="minha-conta-infinitepay"
+              disabled={gatewaySaving}
+              autoFocus
+            />
+            {gatewayError && <p className="modal-error">{gatewayError}</p>}
+            <button className="solid full" onClick={saveGatewayHandle} disabled={!gatewayInput.trim() || gatewaySaving}>
+              {gatewaySaving ? "Salvando…" : "Salvar conta"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {memberModal && openGroup && (
-        <div className="backdrop" onMouseDown={() => setMemberModal(false)}>
+        <div className="backdrop" onMouseDown={() => !memberSaving && setMemberModal(false)}>
           <div className="modal" role="dialog" aria-modal="true" aria-label="Participante" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="modal-top"><h2>Adicionar a {openGroup.name}</h2><button className="ghost-icon" onClick={() => setMemberModal(false)} aria-label="Fechar"><X size={18} /></button></div>
+            <div className="modal-top"><h2>Adicionar a {openGroup.name}</h2><button className="ghost-icon" onClick={() => setMemberModal(false)} aria-label="Fechar" disabled={memberSaving}><X size={18} /></button></div>
             <label htmlFor="m-name">Nome</label>
-            <input id="m-name" value={memberForm.name} onChange={(e) => setMemberForm({ ...memberForm, name: e.target.value })} placeholder="Nome do participante" autoFocus />
+            <input id="m-name" value={memberForm.name} onChange={(e) => setMemberForm({ ...memberForm, name: e.target.value })} placeholder="Nome do participante" autoFocus disabled={memberSaving} />
             <label htmlFor="m-phone">Celular com DDD</label>
-            <input id="m-phone" value={memberForm.phone} onChange={(e) => setMemberForm({ ...memberForm, phone: e.target.value })} placeholder="(11) 98812-4410" inputMode="tel" />
-            <button className="solid full" onClick={() => addMember(openGroup.id)} disabled={!memberForm.name.trim() || !memberForm.phone.trim()}>Adicionar</button>
+            <input id="m-phone" value={memberForm.phone} onChange={(e) => setMemberForm({ ...memberForm, phone: e.target.value })} placeholder="(11) 98812-4410" inputMode="tel" disabled={memberSaving} />
+            {memberError && <p className="modal-error">{memberError}</p>}
+            <button className="solid full" onClick={() => addMember(openGroup.id)} disabled={!memberForm.name.trim() || !memberForm.phone.trim() || memberSaving}>
+              {memberSaving ? "Adicionando…" : "Adicionar"}
+            </button>
           </div>
         </div>
       )}
@@ -454,7 +790,7 @@ export default function GroupayDashboard() {
             <input id="g-sport" value={form.sport} onChange={(e) => setForm({ ...form, sport: e.target.value })} placeholder="Basquete" />
             <label htmlFor="g-amount">Mensalidade (R$)</label>
             <input id="g-amount" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value.replace(/\D/g, "") })} inputMode="numeric" placeholder="80" />
-            <button className="solid full" onClick={createGroup} disabled={!form.name.trim()}>Criar grupo</button>
+            <button className="solid full" onClick={createGroup} disabled={!form.name.trim() || creatingGroup}>{creatingGroup ? "Criando…" : "Criar grupo"}</button>
           </div>
         </div>
       )}
@@ -493,24 +829,25 @@ export default function GroupayDashboard() {
       )}
 
       {groupEditModal && openGroup && (
-        <div className="backdrop" onMouseDown={() => setGroupEditModal(false)}>
+        <div className="backdrop" onMouseDown={() => !groupSaving && setGroupEditModal(false)}>
           <div className="modal" role="dialog" aria-modal="true" aria-label="Editar grupo" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="modal-top"><h2>Editar grupo</h2><button className="ghost-icon" onClick={() => setGroupEditModal(false)} aria-label="Fechar"><X size={18} /></button></div>
+            <div className="modal-top"><h2>Editar grupo</h2><button className="ghost-icon" onClick={() => setGroupEditModal(false)} aria-label="Fechar" disabled={groupSaving}><X size={18} /></button></div>
             <label htmlFor="ge-name">Nome do grupo</label>
-            <input id="ge-name" value={groupEditName} onChange={(e) => setGroupEditName(e.target.value)} autoFocus />
+            <input id="ge-name" value={groupEditName} onChange={(e) => setGroupEditName(e.target.value)} autoFocus disabled={groupSaving} />
+            {groupError && <p className="modal-error">{groupError}</p>}
             <div className="modal-actions">
-              <button className="mini" onClick={() => setGroupEditModal(false)}>Cancelar</button>
-              <button className="solid" onClick={saveGroupName} disabled={!groupEditName.trim()}>Salvar nome</button>
+              <button className="mini" onClick={() => setGroupEditModal(false)} disabled={groupSaving}>Cancelar</button>
+              <button className="solid" onClick={saveGroupName} disabled={!groupEditName.trim() || groupSaving}>{groupSaving ? "Salvando…" : "Salvar nome"}</button>
             </div>
 
             {!confirmDeleteGroup ? (
-              <button className="mini danger full" onClick={() => setConfirmDeleteGroup(true)}><Trash2 size={13} /> Remover grupo</button>
+              <button className="mini danger full" onClick={() => setConfirmDeleteGroup(true)}><Trash2 size={13} /> Arquivar grupo</button>
             ) : (
               <div className="danger-confirm">
-                <p className="modal-hint">Remover &quot;{openGroup.name}&quot; também desvincula todos os participantes deste grupo (mock local — ainda não sincroniza com o backend).</p>
+                <p className="modal-hint">Arquivar &quot;{openGroup.name}&quot; o remove das listas ativas. Não é possível arquivar um grupo com cobranças em aberto.</p>
                 <div className="modal-actions">
-                  <button className="mini" onClick={() => setConfirmDeleteGroup(false)}>Cancelar</button>
-                  <button className="solid danger" onClick={removeGroup}>Confirmar remoção</button>
+                  <button className="mini" onClick={() => setConfirmDeleteGroup(false)} disabled={groupSaving}>Cancelar</button>
+                  <button className="solid danger" onClick={removeGroup} disabled={groupSaving}>{groupSaving ? "Arquivando…" : "Confirmar arquivamento"}</button>
                 </div>
               </div>
             )}
@@ -524,11 +861,10 @@ export default function GroupayDashboard() {
             <div className="modal-top"><h2>{participantModalPerson.name}</h2><button className="ghost-icon" onClick={() => setParticipantModal(null)} aria-label="Fechar" disabled={participantSaving}><X size={18} /></button></div>
 
             <label htmlFor="pe-name">Nome</label>
-            <input id="pe-name" value={participantEditForm.name} onChange={(e) => setParticipantEditForm({ ...participantEditForm, name: e.target.value })} />
+            <input id="pe-name" value={participantEditForm.name} onChange={(e) => setParticipantEditForm({ ...participantEditForm, name: e.target.value })} disabled={participantSaving} />
             <label htmlFor="pe-phone">Celular</label>
-            <input id="pe-phone" value={participantEditForm.phone} onChange={(e) => setParticipantEditForm({ ...participantEditForm, phone: e.target.value })} inputMode="tel" />
-            <p className="modal-hint">Edição ainda não é salva no servidor — falta a rota PATCH de participante no backend. Por enquanto fica só neste navegador.</p>
-            <button className="mini full" onClick={saveParticipantEdit} disabled={!participantEditForm.name.trim() || !participantEditForm.phone.trim()}>Salvar (local)</button>
+            <input id="pe-phone" value={participantEditForm.phone} onChange={(e) => setParticipantEditForm({ ...participantEditForm, phone: e.target.value })} inputMode="tel" disabled={participantSaving} />
+            <button className="mini full" onClick={saveParticipantEdit} disabled={!participantEditForm.name.trim() || !participantEditForm.phone.trim() || participantSaving}>{participantSaving ? "Salvando…" : "Salvar"}</button>
 
             {participantError && <p className="modal-error">{participantError}</p>}
             <div className="danger-confirm">
@@ -612,6 +948,7 @@ export default function GroupayDashboard() {
         </nav>
         <div className="side-end">
           <button className={view === "settings" ? "nav on" : "nav"} onClick={() => go("settings")}><Settings size={17} strokeWidth={1.7} /> Configurações</button>
+          <button className="nav" onClick={handleLogout}><LogOut size={17} strokeWidth={1.7} /> Sair</button>
           <div className="me"><span>LM</span><div><strong>Lucas Martins</strong><small>Organizador</small></div></div>
         </div>
       </aside>
@@ -622,7 +959,7 @@ export default function GroupayDashboard() {
         <header className="bar">
           <button className="ghost-icon only-mobile" onClick={() => setMenuOpen(true)} aria-label="Abrir menu"><Menu size={20} /></button>
           <h1>{openGroup ? openGroup.name : navItems.find((item) => item.id === view)?.label ?? "Configurações"}</h1>
-          {!openGroup && <select value={competence} onChange={(e) => setCompetence(e.target.value)} aria-label="Competência">{competences.map((item) => <option key={item} value={item}>{competenceLabels[item]}</option>)}</select>}
+          {!openGroup && <select value={competence} onChange={(e) => setCompetence(e.target.value)} aria-label="Competência">{RECENT_MONTHS.map((item) => <option key={item} value={item}>{monthLabel(item)}</option>)}</select>}
         </header>
 
         <div className="page">
@@ -630,8 +967,7 @@ export default function GroupayDashboard() {
             <ManagedGroupView
               group={openGroup}
               participants={participants.filter((p) => p.groupIds.includes(openGroup.id))}
-              charges={periodCharges.filter((c) => c.groupId === openGroup.id)}
-              competence={competence}
+              charges={charges.filter((c) => c.groupId === openGroup.id)}
               nameOf={nameOf}
               onBack={() => setOpenGroupId(null)}
               onAddMember={() => setMemberModal(true)}
@@ -641,6 +977,8 @@ export default function GroupayDashboard() {
               onCopyMessage={() => createChargeMessage(openGroup)}
               onEditGroup={() => openGroupEditModal(openGroup)}
               onOpenParticipant={(participant) => openParticipantModal(openGroup.id, participant)}
+              onGenerateBilling={generateBillingForOpenGroup}
+              billingSaving={billingSaving}
             />
           ) : view === "overview" ? (
             <>
@@ -653,7 +991,7 @@ export default function GroupayDashboard() {
               <section className="block">
                 <div className="block-top"><h2>Grupos</h2><button className="solid" onClick={() => setModalOpen(true)}><Plus size={15} /> Novo</button></div>
                 <ul className="list">
-                  {groups.map((group) => {
+                  {activeGroups.map((group) => {
                     const rows = periodCharges.filter((c) => c.groupId === group.id);
                     const pending = rows.filter((c) => c.status === "pending").length;
                     return (
@@ -671,13 +1009,13 @@ export default function GroupayDashboard() {
 
               {totals.pendingCount > 0 && (
                 <section className="block">
-                  <div className="block-top"><h2>Pendências de {competenceLabels[competence]}</h2><button className="link" onClick={() => go("charges")}>Cobrança</button></div>
+                  <div className="block-top"><h2>Pendências de {monthLabel(competence)}</h2><button className="link" onClick={() => go("charges")}>Cobrança</button></div>
                   <ul className="list">
                     {periodCharges.filter((c) => c.status === "pending").slice(0, 4).map((charge) => (
                       <li key={charge.id}>
                         <div className="row static">
-                          <span className="badge soft">{nameOf(charge.participantId).slice(0, 2).toUpperCase()}</span>
-                          <span className="row-main"><strong>{nameOf(charge.participantId)}</strong><small>{groupOf(charge.groupId)?.name}</small></span>
+                          <span className="badge soft">{(charge.participantName ?? nameOf(charge.participantId)).slice(0, 2).toUpperCase()}</span>
+                          <span className="row-main"><strong>{charge.participantName ?? nameOf(charge.participantId)}</strong><small>{groupOf(charge.groupId)?.name}</small></span>
                           <strong className="value">{formatMoney(charge.amount)}</strong>
                           <button className="mini" onClick={() => openSettleModal(charge.id)}>Dar baixa</button>
                         </div>
@@ -689,9 +1027,9 @@ export default function GroupayDashboard() {
             </>
           ) : view === "groups" ? (
             <section className="block">
-              <div className="block-top"><h2>{groups.length} grupos</h2><button className="solid" onClick={() => setModalOpen(true)}><Plus size={15} /> Novo</button></div>
+              <div className="block-top"><h2>{groupsLoading ? "Carregando…" : `${activeGroups.length} grupos`}</h2><button className="solid" onClick={() => setModalOpen(true)}><Plus size={15} /> Novo</button></div>
               <ul className="list">
-                {groups.map((group) => {
+                {activeGroups.map((group) => {
                   const rows = periodCharges.filter((c) => c.groupId === group.id);
                   const paid = rows.filter((c) => c.status === "paid").length;
                   const percent = rows.length ? Math.round((paid / rows.length) * 100) : 0;
@@ -709,7 +1047,7 @@ export default function GroupayDashboard() {
             </section>
           ) : view === "charges" ? (
             <section className="block">
-              <div className="block-top"><h2>Cobrança · {competenceLabels[competence]}</h2></div>
+              <div className="block-top"><h2>Cobrança · {monthLabel(competence)}</h2></div>
               <ChargeTabs
                 charges={periodCharges}
                 nameOf={nameOf}
@@ -727,7 +1065,18 @@ export default function GroupayDashboard() {
                     <button className="mini" onClick={() => { setPixInput(settings.pixKey); setPixModal(true); }}><CreditCard size={13} /> {settings.pixKey ? "Editar" : "Cadastrar"}</button>
                   </div>
                 </li>
-                <li><div className="row static"><span className="row-main"><strong>Gateway de pagamento</strong><small>Split nativo por conta conectada</small></span><span className="tag green-tag">Conectado</span></div></li>
+                <li>
+                  <div className="row static">
+                    <span className="row-main">
+                      <strong>Gateway de pagamento (InfinitePay)</strong>
+                      <small>{gatewayAccount ? `InfiniteTag · ${gatewayAccount.externalAccountId}` : "Nenhuma conta cadastrada"}</small>
+                    </span>
+                    <span className={gatewayAccount?.status === "active" ? "tag green-tag" : "tag red-tag"}>
+                      {gatewayAccount?.status === "active" ? "Conectado" : "Não configurado"}
+                    </span>
+                    <button className="mini" onClick={openGatewayModal}><CreditCard size={13} /> {gatewayAccount ? "Editar" : "Cadastrar"}</button>
+                  </div>
+                </li>
                 <li><div className="row static"><span className="row-main"><strong>Modelo de cobrança</strong><small>Plano + comissão por pagamento</small></span><span className="tag green-tag">Ativo</span></div></li>
                 <li><div className="row static"><span className="row-main"><strong>Organização</strong><small>Arena Martins · multi-tenant</small></span><span className="tag green-tag">Ativa</span></div></li>
               </ul>
@@ -743,7 +1092,6 @@ function ManagedGroupView({
   group,
   participants,
   charges,
-  competence,
   nameOf,
   onBack,
   onAddMember,
@@ -753,11 +1101,12 @@ function ManagedGroupView({
   onCopyMessage,
   onEditGroup,
   onOpenParticipant,
+  onGenerateBilling,
+  billingSaving,
 }: {
   group: Group;
   participants: Participant[];
   charges: Charge[];
-  competence: string;
   nameOf: (id: string) => string;
   onBack: () => void;
   onAddMember: () => void;
@@ -767,6 +1116,8 @@ function ManagedGroupView({
   onCopyMessage: () => void;
   onEditGroup: () => void;
   onOpenParticipant: (participant: Participant) => void;
+  onGenerateBilling: () => void;
+  billingSaving: boolean;
 }) {
   const paid = charges.filter((c) => c.status === "paid");
   const pending = charges.filter((c) => c.status === "pending");
@@ -775,8 +1126,11 @@ function ManagedGroupView({
     <>
       <button className="back" onClick={onBack}><ArrowLeft size={15} /> Voltar</button>
       <section className="detail">
-        <div><strong>{group.name}</strong><small>{group.sport} · {formatMoney(group.amount)}/mês · {competenceLabels[competence]}</small></div>
+        <div><strong>{group.name}</strong><small>{group.sport} · {formatMoney(group.amount)}/mês · todos os períodos</small></div>
         <div className="detail-btns">
+          <button className="mini" onClick={onGenerateBilling} disabled={billingSaving}>
+            <WalletCards size={13} /> {billingSaving ? "Gerando…" : "Gerar cobrança do mês"}
+          </button>
           <button className="mini" onClick={onCopyLink}><Copy size={13} /> Copiar link</button>
           <button className="mini" onClick={onCopyMessage}><Copy size={13} /> Copiar mensagem</button>
           <button className="mini" onClick={onEditGroup}><Pencil size={13} /> Editar grupo</button>
@@ -798,17 +1152,20 @@ function ManagedGroupView({
         </div>
         <ul className="list">
           {participants.map((person) => {
-            const charge = charges.find((c) => c.participantId === person.id);
+            const personCharges = charges.filter((c) => c.participantId === person.id);
+            const pendingCharges = personCharges.filter((c) => c.status === "pending");
+            const charge = pendingCharges[0] ?? personCharges[0];
             const status = charge?.status ?? "pending";
+            const pendingLabel = pendingCharges.length > 1 ? `Aguardando pagamento (${pendingCharges.length} meses)` : "Aguardando pagamento";
             return (
               <li key={person.id}>
                 <div className="row static">
                   <button className="row-click" onClick={() => onOpenParticipant(person)}>
                     <span className={status === "paid" ? "dot green-dot" : "dot red-dot"} />
-                    <span className="row-main"><strong>{person.name}</strong><small>{person.phone} · {status === "paid" ? `Pago em ${charge?.paidAt ? formatDate(charge.paidAt) : ""}` : "Aguardando pagamento"}</small></span>
+                    <span className="row-main"><strong>{person.name}</strong><small>{person.phone} · {status === "paid" ? `Pago em ${charge?.paidAt ? formatDate(charge.paidAt) : ""}` : pendingLabel}</small></span>
                   </button>
                   <strong className="value">{formatMoney(charge?.amount ?? 0)}</strong>
-                  {status === "pending" && <button className="mini" onClick={() => onSettle(charge!.id)}>Baixa manual</button>}
+                  {status === "pending" && charge && <button className="mini" onClick={() => onSettle(charge.id)}>Baixa manual</button>}
                 </div>
               </li>
             );
@@ -848,7 +1205,7 @@ function ChargeTabs({
             <li key={charge.id}>
               <div className="row static">
                 <span className={charge.status === "paid" ? "dot green-dot" : "dot red-dot"} />
-                <span className="row-main"><strong>{nameOf(charge.participantId)}</strong><small>{groupOf(charge.groupId)?.name}{charge.paidAt ? ` · pago em ${formatDate(charge.paidAt)}` : " · em aberto"}</small></span>
+                <span className="row-main"><strong>{charge.participantName ?? nameOf(charge.participantId)}</strong><small>{groupOf(charge.groupId)?.name}{charge.paidAt ? ` · pago em ${formatDate(charge.paidAt)}` : " · em aberto"}</small></span>
                 {charge.source && <span className="chip">{charge.source === "manual" ? "Manual" : "Checkout"}</span>}
                 <strong className="value">{formatMoney(charge.amount)}</strong>
                 {charge.status === "pending" && <button className="mini" onClick={() => onSettle(charge.id)}>Baixa</button>}

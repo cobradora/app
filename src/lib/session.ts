@@ -1,5 +1,8 @@
 import { SignJWT, jwtVerify } from "jose";
 
+export const SESSION_COOKIE_NAME = "groupay_session";
+export const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60; // 30d, mesmo prazo do JWT abaixo
+
 export type SessionPayload = {
   userId: string;
   organizationId: string;

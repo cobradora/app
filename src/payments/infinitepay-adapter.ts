@@ -15,12 +15,11 @@ import { eq } from "drizzle-orm";
 // um MITM) devolver uma URL de checkout fora do dominio esperado.
 const ALLOWED_CHECKOUT_HOSTS = new Set(["checkout.infinitepay.com.br", "checkout.infinitepay.io"]);
 
+const DEFAULT_INFINITEPAY_API_URL = "https://api.checkout.infinitepay.io";
+
 export function getInfinitePayConfig() {
-  const apiUrl = process.env.INFINITEPAY_API_URL;
+  const apiUrl = process.env.INFINITEPAY_API_URL ?? DEFAULT_INFINITEPAY_API_URL;
   const appBaseUrl = process.env.APP_BASE_URL;
-  if (!apiUrl) {
-    throw new Error("INFINITEPAY_API_URL ausente");
-  }
   if (!appBaseUrl) {
     throw new Error("APP_BASE_URL ausente");
   }

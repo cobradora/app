@@ -72,6 +72,7 @@ export const users = pgTable("users", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id),
   name: varchar("name", { length: 200 }).notNull(),
   email: varchar("email", { length: 255 }).notNull(),
+  passwordHash: varchar("password_hash", { length: 255 }),
   role: userRoleEnum("role").notNull().default("member"),
   status: userStatusEnum("status").notNull().default("active"),
 }, (table) => ({

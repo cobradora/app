@@ -10,6 +10,63 @@ describe("apiClient", () => {
     global.fetch = vi.fn();
   });
 
+  it("getInfinitePayAccount faz GET /api/settings/gateway-account e retorna account (ou null)", async () => {
+    mockFetchOnce({ ok: true, json: async () => ({ account: null }) });
+
+    const account = await apiClient.getInfinitePayAccount();
+
+    expect(global.fetch).toHaveBeenCalledWith("/api/settings/gateway-account", expect.objectContaining({ method: "GET" }));
+    expect(account).toBeNull();
+  });
+
+  it("setInfinitePayHandle faz PATCH /api/settings/gateway-account com o body serializado", async () => {
+    mockFetchOnce({
+      ok: true,
+      json: async () => ({ account: { id: "ga1", organizationId: "org1", provider: "infinitepay", externalAccountId: "minha-conta", status: "active" } }),
+    });
+
+    const account = await apiClient.setInfinitePayHandle("minha-conta");
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/settings/gateway-account",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ handle: "minha-conta" }) }),
+    );
+    expect(account.externalAccountId).toBe("minha-conta");
+  });
+
+  it("signup faz POST /api/auth/signup com o body serializado e retorna user", async () => {
+    mockFetchOnce({ ok: true, json: async () => ({ user: { id: "u1", name: "Lucas", email: "lucas@arenanova.com.br" } }) });
+
+    const user = await apiClient.signup({
+      organizationName: "Arena Nova",
+      name: "Lucas",
+      email: "lucas@arenanova.com.br",
+      password: "senha-forte-123",
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/auth/signup",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          organizationName: "Arena Nova",
+          name: "Lucas",
+          email: "lucas@arenanova.com.br",
+          password: "senha-forte-123",
+        }),
+      }),
+    );
+    expect(user).toEqual({ id: "u1", name: "Lucas", email: "lucas@arenanova.com.br" });
+  });
+
+  it("signup lanca erro legivel quando o email ja esta em uso (409)", async () => {
+    mockFetchOnce({ ok: false, json: async () => ({ error: "email_taken", message: "Já existe uma conta com esse email" }) });
+
+    await expect(
+      apiClient.signup({ organizationName: "Arena Nova", name: "Lucas", email: "lucas@arenanova.com.br", password: "senha-forte-123" }),
+    ).rejects.toThrow("Já existe uma conta com esse email");
+  });
+
   it("listGroups faz GET /api/groups e retorna groups", async () => {
     mockFetchOnce({ ok: true, json: async () => ({ groups: [{ id: "g1", name: "Vôlei" }] }) });
 
@@ -32,6 +89,36 @@ describe("apiClient", () => {
       }),
     );
     expect(group).toEqual({ id: "g2", name: "Futebol" });
+  });
+
+  it("listGroupCharges faz GET /api/groups/:groupId/charges e retorna charges", async () => {
+    mockFetchOnce({
+      ok: true,
+      json: async () => ({ charges: [{ chargeId: "c1", participantId: "p1", participantName: "Marina", totalAmount: 8000, status: "open", referenceMonth: "2026-08", dueDate: "2026-08-10" }] }),
+    });
+
+    const charges = await apiClient.listGroupCharges("g1");
+
+    expect(global.fetch).toHaveBeenCalledWith("/api/groups/g1/charges", expect.objectContaining({ method: "GET" }));
+    expect(charges).toHaveLength(1);
+    expect(charges[0].participantName).toBe("Marina");
+  });
+
+  it("listOrganizationCharges faz GET /api/charges?referenceMonth= e retorna charges", async () => {
+    mockFetchOnce({
+      ok: true,
+      json: async () => ({
+        charges: [
+          { chargeId: "c1", groupId: "g1", groupName: "Vôlei", participantId: "p1", participantName: "Marina", totalAmount: 8000, status: "open", referenceMonth: "2026-08", dueDate: "2026-08-10" },
+        ],
+      }),
+    });
+
+    const charges = await apiClient.listOrganizationCharges("2026-08");
+
+    expect(global.fetch).toHaveBeenCalledWith("/api/charges?referenceMonth=2026-08", expect.objectContaining({ method: "GET" }));
+    expect(charges).toHaveLength(1);
+    expect(charges[0].groupName).toBe("Vôlei");
   });
 
   it("generateBillingPeriod faz POST /api/groups/:groupId/billing-periods e retorna billingPeriod", async () => {
@@ -110,5 +197,62 @@ describe("apiClient", () => {
     mockFetchOnce({ ok: false, json: async () => ({ error: "unauthorized" }) });
 
     await expect(apiClient.listGroups()).rejects.toThrow("unauthorized");
+  });
+
+  it("updateGroup faz PATCH /api/groups/:groupId com o body serializado e retorna group", async () => {
+    mockFetchOnce({ ok: true, json: async () => ({ group: { id: "g1", name: "Novo nome" } }) });
+
+    const group = await apiClient.updateGroup("g1", { name: "Novo nome" });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/groups/g1",
+      expect.objectContaining({ method: "PATCH", body: JSON.stringify({ name: "Novo nome" }) }),
+    );
+    expect(group).toEqual({ id: "g1", name: "Novo nome" });
+  });
+
+  it("deleteGroup faz DELETE /api/groups/:groupId e retorna o grupo arquivado", async () => {
+    mockFetchOnce({ ok: true, json: async () => ({ group: { id: "g1", status: "archived" } }) });
+
+    const group = await apiClient.deleteGroup("g1");
+
+    expect(global.fetch).toHaveBeenCalledWith("/api/groups/g1", expect.objectContaining({ method: "DELETE" }));
+    expect(group).toEqual({ id: "g1", status: "archived" });
+  });
+
+  it("updateParticipant faz PATCH /api/participants/:participantId com o body serializado", async () => {
+    mockFetchOnce({ ok: true, json: async () => ({ participant: { id: "p1", name: "Novo nome" } }) });
+
+    const participant = await apiClient.updateParticipant("p1", { name: "Novo nome", phone: "(11) 98812-4410" });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/participants/p1",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ name: "Novo nome", phone: "(11) 98812-4410" }),
+      }),
+    );
+    expect(participant).toEqual({ id: "p1", name: "Novo nome" });
+  });
+
+  it("listGroupParticipants faz GET /api/groups/:groupId/participants e retorna participants", async () => {
+    mockFetchOnce({
+      ok: true,
+      json: async () => ({ participants: [{ participantId: "p1", name: "Marina", phoneDisplay: "(11) 98812-4410" }] }),
+    });
+
+    const participants = await apiClient.listGroupParticipants("g1");
+
+    expect(global.fetch).toHaveBeenCalledWith("/api/groups/g1/participants", expect.objectContaining({ method: "GET" }));
+    expect(participants).toEqual([{ participantId: "p1", name: "Marina", phoneDisplay: "(11) 98812-4410" }]);
+  });
+
+  it("lanca erro legivel quando o guard de saldo pendente rejeita a arquivamento (409)", async () => {
+    mockFetchOnce({
+      ok: false,
+      json: async () => ({ error: "group_has_outstanding_charges", message: "Não é possível arquivar o grupo: existem cobranças em aberto" }),
+    });
+
+    await expect(apiClient.deleteGroup("g1")).rejects.toThrow("Não é possível arquivar o grupo: existem cobranças em aberto");
   });
 });
