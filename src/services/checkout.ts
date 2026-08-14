@@ -153,6 +153,8 @@ export async function createCheckoutForCharges(
       gatewayExternalAccountId: gatewayAccount.externalAccountId,
       externalReference: session.id,
       webhookToken,
+      buyerName: participant.name,
+      buyerPhone: participant.phoneNormalized,
     });
 
     await db

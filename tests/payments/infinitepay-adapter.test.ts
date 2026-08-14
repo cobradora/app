@@ -82,6 +82,38 @@ describe("infinitepay adapter - createCheckout", () => {
     expect(body.order_nsu).toBe("session-1");
     expect(body.webhook_url).toContain("token=token-1");
   });
+
+  it("envia customer.name e customer.phone_number quando buyerName/buyerPhone sao informados", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ url: "https://checkout.infinitepay.io/abc123" }),
+      text: async () => "",
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const adapter = createInfinitePayAdapter();
+    await adapter.createCheckout(baseInput({ buyerName: "Maria Silva", buyerPhone: "+5511999999999" }));
+
+    const [, options] = fetchMock.mock.calls[0];
+    const body = JSON.parse((options as RequestInit).body as string);
+    expect(body.customer).toEqual({ name: "Maria Silva", phone_number: "+5511999999999" });
+  });
+
+  it("nao inclui customer quando buyerPhone nao e informado", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ url: "https://checkout.infinitepay.io/abc123" }),
+      text: async () => "",
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const adapter = createInfinitePayAdapter();
+    await adapter.createCheckout(baseInput());
+
+    const [, options] = fetchMock.mock.calls[0];
+    const body = JSON.parse((options as RequestInit).body as string);
+    expect(body.customer).toBeUndefined();
+  });
 });
 
 describe("infinitepay adapter - parseWebhook", () => {

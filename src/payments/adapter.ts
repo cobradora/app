@@ -10,6 +10,8 @@ export type CreateCheckoutInput = {
   gatewayExternalAccountId?: string; // handle InfinitePay da organizacao (gatewayAccounts.externalAccountId)
   externalReference?: string; // id da checkoutSession ja persistida, usado como order_nsu
   webhookToken?: string; // segredo em claro (base64url) gerado pelo service; o adapter nao o persiste, so o embute na webhook_url
+  buyerName?: string; // nome do participante, para pre-preencher customer.name na InfinitePay
+  buyerPhone?: string; // participants.phoneNormalized (+55DDDNNNNNNNNN), para pre-preencher customer.phone_number
 };
 
 export type CreateCheckoutResult = {

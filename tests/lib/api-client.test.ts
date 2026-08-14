@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { apiClient } from "@/lib/api-client";
 
-function mockFetchOnce(response: { ok: boolean; json: () => Promise<unknown> }) {
-  (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(response);
+function mockFetchOnce(response: { ok: boolean; json: () => Promise<unknown>; status?: number; statusText?: string }) {
+  const text = async () => JSON.stringify(await response.json());
+  (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ status: 200, statusText: "", ...response, text });
 }
 
 describe("apiClient", () => {

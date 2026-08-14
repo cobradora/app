@@ -69,6 +69,9 @@ export function createInfinitePayAdapter(): PaymentsAdapter {
           items: [{ quantity: 1, price: input.amount, description: "Cobrança Groupay" }],
           redirect_url: `${appBaseUrl}/pagamento/sucesso`,
           webhook_url: `${appBaseUrl}/api/webhooks/infinitepay?token=${encodeURIComponent(webhookToken)}`,
+          ...(input.buyerPhone && {
+            customer: { name: input.buyerName, phone_number: input.buyerPhone },
+          }),
         }),
       });
 
