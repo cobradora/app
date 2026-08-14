@@ -32,7 +32,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const { groupId } = await params;
     const body = addParticipantInput.parse(await request.json());
 
-    const participant = await findOrCreateParticipantByPhone(session.organizationId, body.phone);
+    const participant = await findOrCreateParticipantByPhone(session.organizationId, body.phone, body.name);
     await linkParticipantToGroup(groupId, participant.id);
 
     return NextResponse.json({ participant }, { status: 201 });

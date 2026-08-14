@@ -236,9 +236,6 @@ export const apiClient = {
   /**
    * POST /api/groups/:groupId/participants — cria (ou reaproveita, por
    * telefone) o participante e ja o vincula ao grupo em uma unica chamada.
-   * Nota: o servico hoje ignora `name` quando o participante e novo (ver
-   * findOrCreateParticipantByPhone em src/services/participants.ts, que
-   * sempre grava name: "") — isso e um gap do backend, nao deste cliente.
    */
   async addParticipant(groupId: string, input: AddParticipantInput) {
     const data = await request<{ participant: unknown }>(`/api/groups/${groupId}/participants`, {

@@ -114,6 +114,22 @@ describe("infinitepay adapter - createCheckout", () => {
     const body = JSON.parse((options as RequestInit).body as string);
     expect(body.customer).toBeUndefined();
   });
+
+  it("nao inclui customer quando buyerPhone e informado mas buyerName esta vazio (evita 422 da InfinitePay)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ url: "https://checkout.infinitepay.io/abc123" }),
+      text: async () => "",
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const adapter = createInfinitePayAdapter();
+    await adapter.createCheckout(baseInput({ buyerPhone: "+5511999999999", buyerName: "" }));
+
+    const [, options] = fetchMock.mock.calls[0];
+    const body = JSON.parse((options as RequestInit).body as string);
+    expect(body.customer).toBeUndefined();
+  });
 });
 
 describe("infinitepay adapter - parseWebhook", () => {

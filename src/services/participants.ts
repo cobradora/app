@@ -28,7 +28,7 @@ export async function listGroupParticipants(organizationId: string, groupId: str
     .where(and(eq(groupParticipants.groupId, groupId), eq(groupParticipants.status, "active")));
 }
 
-export async function findOrCreateParticipantByPhone(organizationId: string, rawPhone: string) {
+export async function findOrCreateParticipantByPhone(organizationId: string, rawPhone: string, name?: string) {
   const phoneNormalized = normalizePhoneBR(rawPhone);
 
   const [existing] = await db
@@ -42,7 +42,7 @@ export async function findOrCreateParticipantByPhone(organizationId: string, raw
     .insert(participants)
     .values({
       organizationId,
-      name: "",
+      name: name?.trim() || "",
       phoneNormalized,
       phoneDisplay: rawPhone,
     })
