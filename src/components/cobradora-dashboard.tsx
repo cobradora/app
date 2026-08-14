@@ -37,6 +37,7 @@ import { formatDate, formatMoney, type Group, type Participant } from "@/lib/moc
 
 type DashboardUser = { name: string; role: "owner" | "admin" | "member" };
 type ImportRow = { id: string; name: string; include: boolean; phone: string; error: string };
+type DashboardParticipant = Participant & { billingAmounts: Record<string, number> };
 type RawChargeStatus = GroupCharge["status"];
 type DashboardCharge = {
   id: string;
@@ -144,14 +145,30 @@ function mapOrgCharge(row: OrgCharge): DashboardCharge {
   return mapRealCharge(row, row.groupId);
 }
 
-function mapGroupParticipant(row: GroupParticipant, groupId: string): Participant {
+function mapGroupParticipant(row: GroupParticipant, groupId: string): DashboardParticipant {
   return {
     id: row.participantId,
     name: row.name,
     initials: (row.name || "?").slice(0, 2).toUpperCase(),
     phone: row.phoneDisplay,
     groupIds: [groupId],
+    billingAmounts: { [groupId]: row.billingAmount },
   };
+}
+
+function formatAmountInput(cents: number): string {
+  return (cents / 100).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function parseAmountInput(value: string): number {
+  const normalized = value.includes(",")
+    ? value.replace(/\./g, "").replace(",", ".")
+    : value;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
 }
 
 function formatPhoneInput(raw: string): string {
@@ -205,7 +222,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   const isAdmin = user.role === "owner" || user.role === "admin";
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupsLoading, setGroupsLoading] = useState(true);
-  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [participants, setParticipants] = useState<DashboardParticipant[]>([]);
   const [charges, setCharges] = useState<DashboardCharge[]>([]);
   const [competence, setCompetence] = useState(AVAILABLE_MONTHS[0]);
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
@@ -219,7 +236,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   const [gatewayError, setGatewayError] = useState("");
 
   const [memberModal, setMemberModal] = useState(false);
-  const [memberForm, setMemberForm] = useState({ name: "", phone: "" });
+  const [memberForm, setMemberForm] = useState({ name: "", phone: "", billingAmount: "" });
   const [memberSaving, setMemberSaving] = useState(false);
   const [memberError, setMemberError] = useState("");
 
@@ -236,12 +253,13 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
 
   const [groupEditModal, setGroupEditModal] = useState(false);
   const [groupEditName, setGroupEditName] = useState("");
+  const [groupEditAmount, setGroupEditAmount] = useState("");
   const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false);
   const [groupSaving, setGroupSaving] = useState(false);
   const [groupError, setGroupError] = useState("");
 
   const [participantModal, setParticipantModal] = useState<null | { groupId: string; participantId: string }>(null);
-  const [participantEditForm, setParticipantEditForm] = useState({ name: "", phone: "" });
+  const [participantEditForm, setParticipantEditForm] = useState({ name: "", phone: "", billingAmount: "" });
   const [participantSaving, setParticipantSaving] = useState(false);
   const [participantError, setParticipantError] = useState("");
 
@@ -301,7 +319,11 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     });
   }
 
-  function upsertParticipantInMap(map: Map<string, Participant>, person: Participant, groupId: string) {
+  function upsertParticipantInMap(
+    map: Map<string, DashboardParticipant>,
+    person: DashboardParticipant,
+    groupId: string,
+  ) {
     const existing = map.get(person.id);
     map.set(
       person.id,
@@ -312,12 +334,13 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
             initials: person.initials,
             phone: person.phone,
             groupIds: Array.from(new Set([...existing.groupIds, groupId])),
+            billingAmounts: { ...existing.billingAmounts, ...person.billingAmounts },
           }
         : person,
     );
   }
 
-  function upsertParticipant(person: Participant, groupId: string) {
+  function upsertParticipant(person: DashboardParticipant, groupId: string) {
     setParticipants((previous) => {
       const map = new Map(previous.map((participant) => [participant.id, participant]));
       upsertParticipantInMap(map, person, groupId);
@@ -325,13 +348,19 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     });
   }
 
-  function reconcileGroupParticipants(mapped: Participant[], groupId: string) {
+  function reconcileGroupParticipants(mapped: DashboardParticipant[], groupId: string) {
     setParticipants((previous) => {
       const map = new Map(previous.map((participant) => [participant.id, participant]));
       const fetchedIds = new Set(mapped.map((participant) => participant.id));
       for (const [id, existing] of map) {
         if (existing.groupIds.includes(groupId) && !fetchedIds.has(id)) {
-          map.set(id, { ...existing, groupIds: existing.groupIds.filter((item) => item !== groupId) });
+          map.set(id, {
+            ...existing,
+            groupIds: existing.groupIds.filter((item) => item !== groupId),
+            billingAmounts: Object.fromEntries(
+              Object.entries(existing.billingAmounts).filter(([item]) => item !== groupId),
+            ),
+          });
         }
       }
       mapped.forEach((person) => upsertParticipantInMap(map, person, groupId));
@@ -446,6 +475,37 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [openGroupId, memberModal, groupEditModal, participantModal, importModal]);
 
+  useEffect(() => {
+    const hasOverlay = Boolean(
+      openGroupId ||
+      gatewayModal ||
+      memberModal ||
+      groupModal ||
+      settleModal ||
+      groupEditModal ||
+      participantModal ||
+      importModal,
+    );
+    if (!hasOverlay) return;
+    const previousOverflow = document.body.style.overflow;
+    const previousOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "none";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscroll;
+    };
+  }, [
+    gatewayModal,
+    groupEditModal,
+    groupModal,
+    importModal,
+    memberModal,
+    openGroupId,
+    participantModal,
+    settleModal,
+  ]);
+
   function groupOf(groupId: string) {
     return groups.find((group) => group.id === groupId);
   }
@@ -555,6 +615,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
 
   function openGroupEditModal(group: Group) {
     setGroupEditName(group.name);
+    setGroupEditAmount(formatAmountInput(Math.round(group.amount * 100)));
     setConfirmDeleteGroup(false);
     setGroupError("");
     setGroupEditModal(true);
@@ -563,14 +624,22 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   async function saveGroupName() {
     if (!openGroup) return;
     const name = groupEditName.trim();
-    if (!name) return;
+    const defaultAmount = parseAmountInput(groupEditAmount);
+    if (!name || defaultAmount <= 0 || defaultAmount > 100_000_000) {
+      setGroupError("Informe um nome e uma sugestão de valor maior que zero.");
+      return;
+    }
     setGroupSaving(true);
     setGroupError("");
     try {
-      await apiClient.updateGroup(openGroup.id, { name });
-      setGroups((previous) => previous.map((group) => (group.id === openGroup.id ? { ...group, name } : group)));
+      await apiClient.updateGroup(openGroup.id, { name, defaultAmount });
+      setGroups((previous) =>
+        previous.map((group) =>
+          group.id === openGroup.id ? { ...group, name, amount: defaultAmount / 100 } : group,
+        ),
+      );
       setGroupEditModal(false);
-      flash(`Grupo atualizado para “${name}”.`);
+      flash(`Grupo “${name}” atualizado.`);
     } catch (error) {
       setGroupError(error instanceof Error ? error.message : "Erro ao atualizar o grupo.");
     } finally {
@@ -591,6 +660,9 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
         previous.map((participant) => ({
           ...participant,
           groupIds: participant.groupIds.filter((groupId) => groupId !== removedId),
+          billingAmounts: Object.fromEntries(
+            Object.entries(participant.billingAmounts).filter(([groupId]) => groupId !== removedId),
+          ),
         })),
       );
       setCharges((previous) => previous.filter((charge) => charge.groupId !== removedId));
@@ -604,20 +676,48 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     }
   }
 
-  function openParticipantModal(groupId: string, participant: Participant) {
+  function openMemberModal(group: Group) {
+    setMemberForm({
+      name: "",
+      phone: "",
+      billingAmount: formatAmountInput(Math.round(group.amount * 100)),
+    });
+    setMemberError("");
+    setMemberModal(true);
+  }
+
+  function openParticipantModal(groupId: string, participant: DashboardParticipant) {
+    const group = groupOf(groupId);
+    const currentCharge = charges.find(
+      (charge) =>
+        charge.groupId === groupId &&
+        charge.participantId === participant.id &&
+        charge.competence === competence &&
+        charge.status !== "ignored",
+    );
+    const billingAmount =
+      participant.billingAmounts[groupId] ??
+      Math.round((currentCharge?.amount ?? group?.amount ?? 0) * 100);
     setParticipantModal({ groupId, participantId: participant.id });
-    setParticipantEditForm({ name: participant.name, phone: participant.phone });
+    setParticipantEditForm({
+      name: participant.name,
+      phone: participant.phone,
+      billingAmount: formatAmountInput(billingAmount),
+    });
     setParticipantError("");
   }
 
   async function saveParticipantEdit() {
     if (!participantModal || !participantModalPerson) return;
+    const groupId = participantModal.groupId;
+    const participantId = participantModalPerson.id;
     const name = participantEditForm.name.trim();
     const phone = participantEditForm.phone.trim();
+    const billingAmount = parseAmountInput(participantEditForm.billingAmount);
     const duplicate = participants.some(
       (participant) =>
-        participant.id !== participantModalPerson.id &&
-        participant.groupIds.includes(participantModal.groupId) &&
+        participant.id !== participantId &&
+        participant.groupIds.includes(groupId) &&
         normalizePersonName(participant.name) === normalizePersonName(name),
     );
     if (duplicate) {
@@ -628,18 +728,55 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       setParticipantError("Informe um telefone brasileiro com DDD.");
       return;
     }
+    if (billingAmount <= 0 || billingAmount > 100_000_000) {
+      setParticipantError("Informe um valor de cobrança maior que zero.");
+      return;
+    }
     setParticipantSaving(true);
     setParticipantError("");
     try {
-      await apiClient.updateParticipant(participantModalPerson.id, { name, phone });
+      const currentBillingAmount = participantModalPerson.billingAmounts[groupId];
+      if (currentBillingAmount !== billingAmount) {
+        await apiClient.updateGroupParticipantBillingAmount(
+          groupId,
+          participantId,
+          billingAmount,
+        );
+        setParticipants((previous) =>
+          previous.map((participant) =>
+            participant.id === participantId
+              ? {
+                  ...participant,
+                  billingAmounts: {
+                    ...participant.billingAmounts,
+                    [groupId]: billingAmount,
+                  },
+                }
+              : participant,
+          ),
+        );
+        setCharges((previous) =>
+          previous.map((charge) =>
+            charge.groupId === groupId &&
+            charge.participantId === participantId &&
+            charge.rawStatus === "open"
+              ? { ...charge, amount: billingAmount / 100 }
+              : charge,
+          ),
+        );
+      }
+      if (name !== participantModalPerson.name || phone !== participantModalPerson.phone) {
+        await apiClient.updateParticipant(participantId, { name, phone });
+      }
       setParticipants((previous) =>
         previous.map((participant) =>
-          participant.id === participantModalPerson.id
+          participant.id === participantId
             ? { ...participant, name, initials: name.slice(0, 2).toUpperCase(), phone }
             : participant,
         ),
       );
-      flash("Dados do participante atualizados.");
+      setParticipantModal(null);
+      flash("Participante e valor de cobrança atualizados.");
     } catch (error) {
       setParticipantError(error instanceof Error ? error.message : "Erro ao atualizar o participante.");
     } finally {
@@ -657,7 +794,13 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       setParticipants((previous) =>
         previous.map((participant) =>
           participant.id === participantId
-            ? { ...participant, groupIds: participant.groupIds.filter((id) => id !== groupId) }
+            ? {
+                ...participant,
+                groupIds: participant.groupIds.filter((id) => id !== groupId),
+                billingAmounts: Object.fromEntries(
+                  Object.entries(participant.billingAmounts).filter(([id]) => id !== groupId),
+                ),
+              }
             : participant,
         ),
       );
@@ -676,6 +819,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   async function addMember(groupId: string) {
     const name = memberForm.name.trim();
     const phone = memberForm.phone.trim();
+    const billingAmount = parseAmountInput(memberForm.billingAmount);
     const duplicate = participants.some(
       (participant) => participant.groupIds.includes(groupId) && normalizePersonName(participant.name) === normalizePersonName(name),
     );
@@ -687,10 +831,14 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       setMemberError("Informe um telefone brasileiro com DDD.");
       return;
     }
+    if (billingAmount <= 0 || billingAmount > 100_000_000) {
+      setMemberError("Informe um valor de cobrança maior que zero.");
+      return;
+    }
     setMemberSaving(true);
     setMemberError("");
     try {
-      const result = unwrapParticipant(await apiClient.addParticipant(groupId, { name, phone }));
+      const result = unwrapParticipant(await apiClient.addParticipant(groupId, { name, phone, billingAmount }));
       const id = result.participant.id ?? `local-${Date.now()}`;
       upsertParticipant(
         {
@@ -699,6 +847,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
           initials: (result.participant.name || name).slice(0, 2).toUpperCase(),
           phone: result.participant.phoneDisplay || result.participant.phone || phone,
           groupIds: [groupId],
+          billingAmounts: { [groupId]: billingAmount },
         },
         groupId,
       );
@@ -707,7 +856,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
         setLateCycleNotice(`${name} foi adicionado, mas entra nas cobranças somente em ${cycle}.`);
       }
       setMemberModal(false);
-      setMemberForm({ name: "", phone: "" });
+      setMemberForm({ name: "", phone: "", billingAmount: "" });
       flash(`${name} adicionado ao grupo.`);
     } catch (error) {
       setMemberError(error instanceof Error ? error.message : "Erro ao adicionar o participante.");
@@ -750,6 +899,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
 
   async function confirmImport() {
     if (!openGroup) return;
+    const suggestedBillingAmount = Math.round(openGroup.amount * 100);
     setImportSaving(true);
     const eligible = importRows.filter((row) => row.include);
     const untouched = importRows.filter((row) => !row.include);
@@ -763,7 +913,13 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
         continue;
       }
       try {
-        const result = unwrapParticipant(await apiClient.addParticipant(openGroup.id, { name: row.name, phone: row.phone }));
+        const result = unwrapParticipant(
+          await apiClient.addParticipant(openGroup.id, {
+            name: row.name,
+            phone: row.phone,
+            billingAmount: suggestedBillingAmount,
+          }),
+        );
         const id = result.participant.id ?? `local-${row.id}`;
         upsertParticipant(
           {
@@ -772,6 +928,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
             initials: (result.participant.name || row.name).slice(0, 2).toUpperCase(),
             phone: result.participant.phoneDisplay || result.participant.phone || row.phone,
             groupIds: [openGroup.id],
+            billingAmounts: { [openGroup.id]: suggestedBillingAmount },
           },
           openGroup.id,
         );
@@ -800,9 +957,9 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   async function createGroup() {
     const name = groupForm.name.trim();
     const billingDay = Number(groupForm.billingDay);
-    const amount = Math.round((Number(groupForm.amount.replace(",", ".")) || 0) * 100);
+    const amount = parseAmountInput(groupForm.amount);
     if (!name || billingDay < 1 || billingDay > 28 || amount <= 0) {
-      setGroupCreateError("Preencha nome, mensalidade e um dia entre 1 e 28.");
+      setGroupCreateError("Preencha nome, sugestão de valor e um dia entre 1 e 28.");
       return;
     }
     setCreatingGroup(true);
@@ -1073,7 +1230,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
         <div className="drawer-backdrop" onMouseDown={() => setOpenGroupId(null)}>
           <aside className="group-drawer" role="dialog" aria-modal="true" aria-labelledby="group-drawer-title" onMouseDown={(event) => event.stopPropagation()}>
             <div className="drawer-header">
-              <div><p className="section-kicker">Detalhes do grupo</p><h2 id="group-drawer-title">{openGroup.name}</h2><span>{formatMoney(openGroup.amount)}/mês · renovação dia {openGroup.dueDay}</span></div>
+              <div><p className="section-kicker">Detalhes do grupo</p><h2 id="group-drawer-title">{openGroup.name}</h2><span>Valor sugerido {formatMoney(openGroup.amount)} · renovação dia {openGroup.dueDay}</span></div>
               <button className="icon-button icon-button--large" type="button" onClick={() => setOpenGroupId(null)} aria-label="Fechar detalhes do grupo"><X size={21} /></button>
             </div>
             <div className="drawer-body">
@@ -1089,11 +1246,12 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                 {isAdmin && <button className="button button--secondary" type="button" onClick={() => openGroupEditModal(openGroup)}><Pencil size={17} /> Editar</button>}
               </div>
               <section className="drawer-participants" aria-labelledby="participants-title">
-                <div className="section-heading"><div><p className="section-kicker">Pessoas</p><h3 id="participants-title">Participantes ({openGroupParticipants.length})</h3></div>{isAdmin && <div className="inline-actions"><button className="button button--secondary button--small" type="button" onClick={() => setImportModal(true)}><ClipboardPaste size={16} /> Importar</button><button className="button button--primary button--small" type="button" onClick={() => { setMemberError(""); setMemberModal(true); }}><Plus size={16} /> Adicionar</button></div>}</div>
+                <div className="section-heading"><div><p className="section-kicker">Pessoas</p><h3 id="participants-title">Participantes ({openGroupParticipants.length})</h3></div>{isAdmin && <div className="inline-actions"><button className="button button--secondary button--small" type="button" onClick={() => setImportModal(true)}><ClipboardPaste size={16} /> Importar</button><button className="button button--primary button--small" type="button" onClick={() => openMemberModal(openGroup)}><Plus size={16} /> Adicionar</button></div>}</div>
                 {openGroupParticipants.length === 0 ? <div className="empty-state"><UsersRound size={27} /><strong>Nenhum participante ainda</strong><p>Adicione uma pessoa ou importe uma lista.</p></div> : <ul className="participant-list">{openGroupParticipants.map((person) => {
                   const charge = openGroupCharges.find((item) => item.participantId === person.id);
                   const label = !charge ? "Entra no próximo ciclo" : charge.status === "paid" ? `Pago${charge.paidAt ? ` em ${formatDate(charge.paidAt)}` : ""}` : charge.rawStatus === "checkout_pending" ? "Checkout em andamento" : "Aguardando pagamento";
-                  return <li key={person.id}><button type="button" className="participant-button" onClick={() => isAdmin && openParticipantModal(openGroup.id, person)} disabled={!isAdmin}><span className={`status-dot ${charge?.status === "paid" ? "status-dot--paid" : !charge ? "status-dot--next" : ""}`} /><span className="person-avatar">{getInitials(person.name)}</span><span className="participant-button__main"><strong>{person.name}</strong><small>{person.phone} · {label}</small></span><strong className="participant-button__amount">{charge ? formatMoney(charge.amount) : "—"}</strong>{isAdmin && <Pencil size={16} aria-hidden="true" />}</button>{isAdmin && charge?.rawStatus === "open" && <button type="button" className="button button--secondary button--small participant-settle" onClick={() => openSettleModal(charge.id)}>Dar baixa</button>}</li>;
+                  const individualAmount = person.billingAmounts[openGroup.id];
+                  return <li key={person.id}><button type="button" className="participant-button" onClick={() => isAdmin && openParticipantModal(openGroup.id, person)} disabled={!isAdmin}><span className={`status-dot ${charge?.status === "paid" ? "status-dot--paid" : !charge ? "status-dot--next" : ""}`} /><span className="person-avatar">{getInitials(person.name)}</span><span className="participant-button__main"><strong>{person.name}</strong><small>{person.phone} · {label}</small></span><span className="participant-button__billing"><small>Valor individual</small><strong>{individualAmount ? formatMoney(individualAmount / 100) : charge ? formatMoney(charge.amount) : formatMoney(openGroup.amount)}</strong></span>{isAdmin && <Pencil className="participant-button__edit" size={16} aria-hidden="true" />}</button>{isAdmin && charge?.rawStatus === "open" && <button type="button" className="button button--secondary button--small participant-settle" onClick={() => openSettleModal(charge.id)}>Dar baixa</button>}</li>;
                 })}</ul>}
               </section>
             </div>
@@ -1102,19 +1260,19 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       )}
 
       {isAdmin && <>
-      {groupModal && <ModalShell title="Novo grupo" id="new-group-title" onClose={() => !creatingGroup && setGroupModal(false)} locked={creatingGroup}><label htmlFor="group-name">Nome do grupo</label><input id="group-name" maxLength={NAME_MAX} value={groupForm.name} onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })} placeholder="Vôlei de quinta" autoFocus disabled={creatingGroup} /><label htmlFor="group-sport">Modalidade (opcional)</label><input id="group-sport" maxLength={40} value={groupForm.sport} onChange={(event) => setGroupForm({ ...groupForm, sport: event.target.value })} placeholder="Vôlei" disabled={creatingGroup} /><div className="field-grid"><div><label htmlFor="group-amount">Mensalidade</label><div className="input-prefix"><span>R$</span><input id="group-amount" value={groupForm.amount} onChange={(event) => setGroupForm({ ...groupForm, amount: event.target.value.replace(/[^\d,.]/g, "") })} inputMode="decimal" placeholder="80,00" disabled={creatingGroup} /></div></div><div><label htmlFor="group-day">Renovação</label><div className="input-prefix"><span>dia</span><input id="group-day" type="number" min={1} max={28} inputMode="numeric" value={groupForm.billingDay} onChange={(event) => setGroupForm({ ...groupForm, billingDay: event.target.value })} disabled={creatingGroup} /></div></div></div>{groupCreateError && <p className="form-error" role="alert">{groupCreateError}</p>}<button className="button button--primary button--full" type="button" onClick={createGroup} disabled={creatingGroup || !groupForm.name.trim()}>{creatingGroup ? "Criando…" : "Criar grupo"}</button></ModalShell>}
+      {groupModal && <ModalShell title="Novo grupo" id="new-group-title" onClose={() => !creatingGroup && setGroupModal(false)} locked={creatingGroup}><label htmlFor="group-name">Nome do grupo</label><input id="group-name" maxLength={NAME_MAX} value={groupForm.name} onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })} placeholder="Vôlei de quinta" autoFocus disabled={creatingGroup} /><label htmlFor="group-sport">Modalidade (opcional)</label><input id="group-sport" maxLength={40} value={groupForm.sport} onChange={(event) => setGroupForm({ ...groupForm, sport: event.target.value })} placeholder="Vôlei" disabled={creatingGroup} /><div className="field-grid"><div><label htmlFor="group-amount">Sugestão de valor</label><div className="input-prefix"><span>R$</span><input id="group-amount" value={groupForm.amount} onChange={(event) => setGroupForm({ ...groupForm, amount: event.target.value.replace(/[^\d,.]/g, "") })} inputMode="decimal" placeholder="80,00" disabled={creatingGroup} /></div><p className="field-hint">Preenche novos cadastros, mas cada participante pode ter seu próprio valor.</p></div><div><label htmlFor="group-day">Renovação</label><div className="input-prefix"><span>dia</span><input id="group-day" type="number" min={1} max={28} inputMode="numeric" value={groupForm.billingDay} onChange={(event) => setGroupForm({ ...groupForm, billingDay: event.target.value })} disabled={creatingGroup} /></div></div></div>{groupCreateError && <p className="form-error" role="alert">{groupCreateError}</p>}<button className="button button--primary button--full" type="button" onClick={createGroup} disabled={creatingGroup || !groupForm.name.trim()}>{creatingGroup ? "Criando…" : "Criar grupo"}</button></ModalShell>}
 
       {gatewayModal && <ModalShell title="Conta InfinitePay" id="gateway-title" onClose={() => !gatewaySaving && setGatewayModal(false)} locked={gatewaySaving}><p className="modal-copy">Informe a InfiniteTag que receberá os pagamentos da organização.</p><label htmlFor="gateway-handle">InfiniteTag (sem $)</label><div className="input-prefix"><span>@</span><input id="gateway-handle" maxLength={80} value={gatewayInput} onChange={(event) => setGatewayInput(event.target.value.replace(/^\$/, ""))} placeholder="minha-infinite-tag" autoFocus disabled={gatewaySaving} /></div>{gatewayError && <p className="form-error" role="alert">{gatewayError}</p>}<button className="button button--primary button--full" type="button" onClick={saveGatewayHandle} disabled={gatewaySaving || !gatewayInput.trim()}>{gatewaySaving ? "Salvando…" : "Salvar InfiniteTag"}</button></ModalShell>}
 
-      {memberModal && openGroup && <ModalShell title={`Adicionar a ${openGroup.name}`} id="member-title" onClose={() => !memberSaving && setMemberModal(false)} locked={memberSaving}><p className="modal-copy">Se o ciclo deste mês já foi renovado, a pessoa entrará apenas na próxima cobrança.</p><label htmlFor="member-name">Nome</label><input id="member-name" maxLength={NAME_MAX} value={memberForm.name} onChange={(event) => setMemberForm({ ...memberForm, name: event.target.value })} placeholder="Nome do participante" autoFocus disabled={memberSaving} /><label htmlFor="member-phone">Celular com DDD</label><input id="member-phone" type="tel" inputMode="numeric" maxLength={15} value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: formatPhoneInput(event.target.value) })} placeholder="(11) 99999-9999" disabled={memberSaving} />{memberError && <p className="form-error" role="alert">{memberError}</p>}<button className="button button--primary button--full" type="button" onClick={() => addMember(openGroup.id)} disabled={memberSaving || !memberForm.name.trim() || !memberForm.phone.trim()}>{memberSaving ? "Adicionando…" : "Adicionar participante"}</button></ModalShell>}
+      {memberModal && openGroup && <ModalShell title={`Adicionar a ${openGroup.name}`} id="member-title" onClose={() => !memberSaving && setMemberModal(false)} locked={memberSaving}><p className="modal-copy">Se o ciclo deste mês já foi renovado, a pessoa entrará apenas na próxima cobrança.</p><label htmlFor="member-name">Nome</label><input id="member-name" maxLength={NAME_MAX} value={memberForm.name} onChange={(event) => setMemberForm({ ...memberForm, name: event.target.value })} placeholder="Nome do participante" autoFocus disabled={memberSaving} /><label htmlFor="member-phone">Celular com DDD</label><input id="member-phone" type="tel" inputMode="numeric" maxLength={15} value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: formatPhoneInput(event.target.value) })} placeholder="(11) 99999-9999" disabled={memberSaving} /><label htmlFor="member-billing-amount">Valor deste participante</label><div className="input-prefix"><span>R$</span><input id="member-billing-amount" inputMode="decimal" value={memberForm.billingAmount} onChange={(event) => setMemberForm({ ...memberForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={memberSaving} /></div><p className="field-hint">A sugestão de {formatMoney(openGroup.amount)} veio do grupo. Ajuste aqui sem alterar os demais participantes.</p>{memberError && <p className="form-error" role="alert">{memberError}</p>}<button className="button button--primary button--full" type="button" onClick={() => addMember(openGroup.id)} disabled={memberSaving || !memberForm.name.trim() || !memberForm.phone.trim() || !memberForm.billingAmount.trim()}>{memberSaving ? "Adicionando…" : "Adicionar participante"}</button></ModalShell>}
 
       {settleModal && <ModalShell title="Registrar pagamento" id="settle-title" onClose={() => !settleSaving && setSettleModal(null)} locked={settleSaving}><p className="modal-copy">Use a baixa manual apenas quando o pagamento foi confirmado fora do checkout.</p><label htmlFor="settle-method">Forma de pagamento</label><select id="settle-method" value={settleMethod} onChange={(event) => setSettleMethod(event.target.value as ManualSettlementInput["paymentMethod"])} disabled={settleSaving}><option value="dinheiro">Dinheiro</option><option value="transferencia">Transferência</option><option value="outro">Outro</option></select><label htmlFor="settle-observation">Observação (opcional)</label><textarea id="settle-observation" maxLength={300} rows={3} value={settleObservation} onChange={(event) => setSettleObservation(event.target.value)} placeholder="Ex.: pago em espécie" disabled={settleSaving} />{settleError && <p className="form-error" role="alert">{settleError}</p>}<div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setSettleModal(null)} disabled={settleSaving}>Cancelar</button><button className="button button--primary" type="button" onClick={confirmSettle} disabled={settleSaving}>{settleSaving ? "Salvando…" : "Confirmar baixa"}</button></div></ModalShell>}
 
-      {groupEditModal && openGroup && <ModalShell title="Editar grupo" id="edit-group-title" onClose={() => !groupSaving && setGroupEditModal(false)} locked={groupSaving}><label htmlFor="edit-group-name">Nome do grupo</label><input id="edit-group-name" maxLength={NAME_MAX} value={groupEditName} onChange={(event) => setGroupEditName(event.target.value)} autoFocus disabled={groupSaving} />{groupError && <p className="form-error" role="alert">{groupError}</p>}<button className="button button--primary button--full" type="button" onClick={saveGroupName} disabled={groupSaving || !groupEditName.trim()}>{groupSaving ? "Salvando…" : "Salvar nome"}</button><div className="danger-zone">{confirmDeleteGroup ? <><p>Arquivar remove o grupo das listas ativas. Grupos com cobranças em aberto não podem ser arquivados.</p><div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setConfirmDeleteGroup(false)} disabled={groupSaving}>Cancelar</button><button className="button button--danger" type="button" onClick={removeGroup} disabled={groupSaving}>{groupSaving ? "Arquivando…" : "Confirmar"}</button></div></> : <button className="button button--danger-soft button--full" type="button" onClick={() => setConfirmDeleteGroup(true)}><Trash2 size={17} /> Arquivar grupo</button>}</div></ModalShell>}
+      {groupEditModal && openGroup && <ModalShell title="Editar grupo" id="edit-group-title" onClose={() => !groupSaving && setGroupEditModal(false)} locked={groupSaving}><label htmlFor="edit-group-name">Nome do grupo</label><input id="edit-group-name" maxLength={NAME_MAX} value={groupEditName} onChange={(event) => setGroupEditName(event.target.value)} autoFocus disabled={groupSaving} /><label htmlFor="edit-group-amount">Sugestão para novos participantes</label><div className="input-prefix"><span>R$</span><input id="edit-group-amount" inputMode="decimal" value={groupEditAmount} onChange={(event) => setGroupEditAmount(event.target.value.replace(/[^\d,.]/g, ""))} placeholder="80,00" disabled={groupSaving} /></div><p className="field-hint">Esta sugestão não altera o valor dos participantes que já estão cadastrados.</p>{groupError && <p className="form-error" role="alert">{groupError}</p>}<button className="button button--primary button--full" type="button" onClick={saveGroupName} disabled={groupSaving || !groupEditName.trim() || !groupEditAmount.trim()}>{groupSaving ? "Salvando…" : "Salvar grupo"}</button><div className="danger-zone">{confirmDeleteGroup ? <><p>Arquivar remove o grupo das listas ativas. Grupos com cobranças em aberto não podem ser arquivados.</p><div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setConfirmDeleteGroup(false)} disabled={groupSaving}>Cancelar</button><button className="button button--danger" type="button" onClick={removeGroup} disabled={groupSaving}>{groupSaving ? "Arquivando…" : "Confirmar"}</button></div></> : <button className="button button--danger-soft button--full" type="button" onClick={() => setConfirmDeleteGroup(true)}><Trash2 size={17} /> Arquivar grupo</button>}</div></ModalShell>}
 
-      {participantModal && participantModalPerson && <ModalShell title={participantModalPerson.name} id="participant-title" onClose={() => !participantSaving && setParticipantModal(null)} locked={participantSaving}><label htmlFor="participant-name">Nome</label><input id="participant-name" maxLength={NAME_MAX} value={participantEditForm.name} onChange={(event) => setParticipantEditForm({ ...participantEditForm, name: event.target.value })} disabled={participantSaving} /><label htmlFor="participant-phone">Celular</label><input id="participant-phone" type="tel" inputMode="numeric" maxLength={15} value={participantEditForm.phone} onChange={(event) => setParticipantEditForm({ ...participantEditForm, phone: formatPhoneInput(event.target.value) })} disabled={participantSaving} />{participantError && <p className="form-error" role="alert">{participantError}</p>}<button className="button button--primary button--full" type="button" onClick={saveParticipantEdit} disabled={participantSaving || !participantEditForm.name.trim() || !participantEditForm.phone.trim()}>{participantSaving ? "Salvando…" : "Salvar participante"}</button><div className="danger-zone"><p>Remover desvincula a pessoa somente deste grupo.</p><button className="button button--danger-soft button--full" type="button" onClick={removeParticipantFromGroup} disabled={participantSaving}><Trash2 size={17} /> Remover do grupo</button></div></ModalShell>}
+      {participantModal && participantModalPerson && <ModalShell title={participantModalPerson.name} id="participant-title" onClose={() => !participantSaving && setParticipantModal(null)} locked={participantSaving}><label htmlFor="participant-name">Nome</label><input id="participant-name" maxLength={NAME_MAX} value={participantEditForm.name} onChange={(event) => setParticipantEditForm({ ...participantEditForm, name: event.target.value })} disabled={participantSaving} /><label htmlFor="participant-phone">Celular</label><input id="participant-phone" type="tel" inputMode="numeric" maxLength={15} value={participantEditForm.phone} onChange={(event) => setParticipantEditForm({ ...participantEditForm, phone: formatPhoneInput(event.target.value) })} disabled={participantSaving} /><label htmlFor="participant-billing-amount">Valor cobrado neste grupo</label><div className="input-prefix"><span>R$</span><input id="participant-billing-amount" inputMode="decimal" value={participantEditForm.billingAmount} onChange={(event) => setParticipantEditForm({ ...participantEditForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={participantSaving} /></div><p className="field-hint">O checkout usará este valor. A alteração também atualiza cobranças abertas; checkouts já iniciados precisam terminar primeiro.</p>{participantError && <p className="form-error" role="alert">{participantError}</p>}<button className="button button--primary button--full" type="button" onClick={saveParticipantEdit} disabled={participantSaving || !participantEditForm.name.trim() || !participantEditForm.phone.trim() || !participantEditForm.billingAmount.trim()}>{participantSaving ? "Salvando…" : "Salvar participante"}</button><div className="danger-zone"><p>Remover desvincula a pessoa somente deste grupo.</p><button className="button button--danger-soft button--full" type="button" onClick={removeParticipantFromGroup} disabled={participantSaving}><Trash2 size={17} /> Remover do grupo</button></div></ModalShell>}
 
-      {importModal && openGroup && <ModalShell title="Importar participantes" id="import-title" wide onClose={() => !importSaving && setImportModal(false)} locked={importSaving}><p className="modal-copy">Cole um nome por linha. Nomes repetidos no grupo serão bloqueados.</p><label htmlFor="import-text">Lista de nomes</label><textarea id="import-text" maxLength={5000} rows={5} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={"1. Ana\n2. Bruno\n3. Camila"} disabled={importSaving} /><button className="button button--secondary button--full" type="button" onClick={analyzeImportText} disabled={importSaving || !importText.trim()}>Analisar lista</button>{importRows.length > 0 && <ul className="import-list">{importRows.map((row) => <li key={row.id} className="import-row"><input type="checkbox" checked={row.include} onChange={(event) => updateImportRow(row.id, { include: event.target.checked })} aria-label={`Incluir ${row.name}`} disabled={importSaving || Boolean(row.error && !row.phone)} /><span className="import-row__name">{row.name}</span>{row.include && <input type="tel" inputMode="numeric" maxLength={15} value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: formatPhoneInput(event.target.value), error: "" })} placeholder="(11) 99999-9999" aria-label={`Telefone de ${row.name}`} disabled={importSaving} />}{row.error && <small role="alert">{row.error}</small>}</li>)}</ul>}{importRows.length > 0 && <div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setImportModal(false)} disabled={importSaving}>Fechar</button><button className="button button--primary" type="button" onClick={confirmImport} disabled={importSaving || !importRows.some((row) => row.include)}>{importSaving ? "Importando…" : "Importar selecionados"}</button></div>}</ModalShell>}
+      {importModal && openGroup && <ModalShell title="Importar participantes" id="import-title" wide onClose={() => !importSaving && setImportModal(false)} locked={importSaving}><p className="modal-copy">Cole um nome por linha. Nomes repetidos no grupo serão bloqueados. Os importados começam com a sugestão de {formatMoney(openGroup.amount)}, que pode ser editada depois em cada cadastro.</p><label htmlFor="import-text">Lista de nomes</label><textarea id="import-text" maxLength={5000} rows={5} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={"1. Ana\n2. Bruno\n3. Camila"} disabled={importSaving} /><button className="button button--secondary button--full" type="button" onClick={analyzeImportText} disabled={importSaving || !importText.trim()}>Analisar lista</button>{importRows.length > 0 && <ul className="import-list">{importRows.map((row) => <li key={row.id} className="import-row"><input type="checkbox" checked={row.include} onChange={(event) => updateImportRow(row.id, { include: event.target.checked })} aria-label={`Incluir ${row.name}`} disabled={importSaving || Boolean(row.error && !row.phone)} /><span className="import-row__name">{row.name}</span>{row.include && <input type="tel" inputMode="numeric" maxLength={15} value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: formatPhoneInput(event.target.value), error: "" })} placeholder="(11) 99999-9999" aria-label={`Telefone de ${row.name}`} disabled={importSaving} />}{row.error && <small role="alert">{row.error}</small>}</li>)}</ul>}{importRows.length > 0 && <div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setImportModal(false)} disabled={importSaving}>Fechar</button><button className="button button--primary" type="button" onClick={confirmImport} disabled={importSaving || !importRows.some((row) => row.include)}>{importSaving ? "Importando…" : "Importar selecionados"}</button></div>}</ModalShell>}
       </>}
     </div>
   );

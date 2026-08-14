@@ -32,6 +32,18 @@ BEGIN
 	END IF;
 END $$;--> statement-breakpoint
 
+-- Cadastros legados podiam conter apenas espacos. Como nao existe um nome
+-- original para recuperar, preservamos o participante com um placeholder
+-- explicito e unico; o administrador pode renomea-lo depois pela interface.
+UPDATE participants
+SET name = 'Participante ' || id::text
+WHERE trim(regexp_replace(
+	translate(lower(coalesce(name, '')),
+		'áàâãäéèêëíìîïóòôõöúùûüçñ',
+		'aaaaaeeeeiiiiooooouuuucn'),
+	'[[:space:]]+', ' ', 'g'
+)) = '';--> statement-breakpoint
+
 ALTER TABLE "participants" ALTER COLUMN "phone_normalized" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "participants" ALTER COLUMN "phone_display" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "participants" ADD COLUMN "financial_contact_id" uuid;--> statement-breakpoint

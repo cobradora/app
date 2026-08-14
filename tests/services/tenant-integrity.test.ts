@@ -56,6 +56,7 @@ describe("integridade estrutural multi-tenant", () => {
       db.insert(groupParticipants).values({
         groupId,
         participantId: participant.id,
+        billingAmount: 5000,
         billingStartsOn: "2026-08-10",
         participantNameNormalized: participant.nameNormalized,
       }),

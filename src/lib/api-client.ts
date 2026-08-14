@@ -65,6 +65,8 @@ export type ManualSettlementInput = {
 export type AddParticipantInput = {
   name: string;
   phone: string;
+  /** Valor individual em centavos. Quando omitido, a API usa a sugestao do grupo. */
+  billingAmount?: number;
 };
 
 export type UpdateGroupInput = {
@@ -142,6 +144,16 @@ export type GroupParticipant = {
   participantId: string;
   name: string;
   phoneDisplay: string;
+  /** Valor individual deste vinculo com o grupo, em centavos. */
+  billingAmount: number;
+};
+
+export type UpdateGroupParticipantBillingResult = {
+  participant: {
+    participantId: string;
+    billingAmount: number;
+  };
+  updatedOpenCharges: number;
 };
 
 export type GatewayAccount = {
@@ -284,6 +296,17 @@ export const apiClient = {
     await request<{ ok: true }>(`/api/groups/${groupId}/participants/${participantId}`, {
       method: "DELETE",
     });
+  },
+
+  /** PATCH /api/groups/:groupId/participants/:participantId — altera o valor individual do vinculo. */
+  async updateGroupParticipantBillingAmount(groupId: string, participantId: string, billingAmount: number) {
+    return request<UpdateGroupParticipantBillingResult>(
+      `/api/groups/${groupId}/participants/${participantId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ billingAmount }),
+      },
+    );
   },
 
   /** PATCH /api/participants/:participantId */

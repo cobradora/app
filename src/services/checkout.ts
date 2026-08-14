@@ -443,10 +443,18 @@ async function reviveCanceledSession(
     if (claimed.length !== selectedCharges.length) {
       throw new PublicCheckoutError("charges_unavailable", "Uma ou mais cobranças não estão disponíveis", 409);
     }
+    const expectedAmounts = new Map(selectedCharges.map((charge) => [charge.id, charge.totalAmount]));
+    if (claimed.some((charge) => expectedAmounts.get(charge.id) !== charge.totalAmount)) {
+      throw new PublicCheckoutError(
+        "charges_unavailable",
+        "O valor de uma ou mais cobranças mudou. Atualize a página antes de continuar.",
+        409,
+      );
+    }
 
     await tx.delete(checkoutItems).where(eq(checkoutItems.checkoutSessionId, session.id));
     await tx.insert(checkoutItems).values(
-      selectedCharges.map((charge) => ({
+      claimed.map((charge) => ({
         checkoutSessionId: session.id,
         chargeId: charge.id,
         amount: charge.totalAmount,
@@ -550,9 +558,17 @@ async function createReservedSession(input: {
     if (claimed.length !== input.selectedCharges.length) {
       throw new PublicCheckoutError("charges_unavailable", "Uma ou mais cobranças não estão disponíveis", 409);
     }
+    const expectedAmounts = new Map(input.selectedCharges.map((charge) => [charge.id, charge.totalAmount]));
+    if (claimed.some((charge) => expectedAmounts.get(charge.id) !== charge.totalAmount)) {
+      throw new PublicCheckoutError(
+        "charges_unavailable",
+        "O valor de uma ou mais cobranças mudou. Atualize a página antes de continuar.",
+        409,
+      );
+    }
 
     await tx.insert(checkoutItems).values(
-      input.selectedCharges.map((charge) => ({
+      claimed.map((charge) => ({
         checkoutSessionId: session.id,
         chargeId: charge.id,
         amount: charge.totalAmount,

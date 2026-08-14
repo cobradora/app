@@ -161,6 +161,7 @@ export const groupParticipants = pgTable("group_participants", {
   id: uuid("id").defaultRandom().primaryKey(),
   groupId: uuid("group_id").notNull().references(() => groups.id),
   participantId: uuid("participant_id").notNull().references(() => participants.id),
+  billingAmount: integer("billing_amount").notNull(),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   billingStartsOn: date("billing_starts_on").notNull(),
   participantNameNormalized: varchar("participant_name_normalized", { length: 200 }).notNull(),
@@ -175,6 +176,10 @@ export const groupParticipants = pgTable("group_participants", {
   oneActiveNormalizedNamePerGroup: uniqueIndex("group_participants_active_name_unique")
     .on(table.groupId, table.participantNameNormalized)
     .where(sql`${table.status} = 'active'`),
+  billingAmountCheck: check(
+    "group_participants_billing_amount_check",
+    sql`${table.billingAmount} between 1 and 100000000`,
+  ),
 }));
 
 // ---------- billing_periods ----------

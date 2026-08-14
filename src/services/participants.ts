@@ -61,11 +61,33 @@ const participantFields = z.object({
     .refine(validPhone, "Informe um celular brasileiro válido com DDD"),
 });
 
-export const addParticipantInput = participantFields;
+/** R$ 1.000.000,00 em centavos: teto defensivo para entrada administrativa. */
+export const MAX_PARTICIPANT_BILLING_AMOUNT = 100_000_000;
+
+const participantBillingAmount = z
+  .number()
+  .int("O valor deve ser informado em centavos")
+  .min(1, "O valor da cobrança deve ser maior que zero")
+  .max(MAX_PARTICIPANT_BILLING_AMOUNT, "O valor da cobrança excede o limite permitido");
+
+export const addParticipantInput = participantFields.extend({
+  billingAmount: participantBillingAmount.optional(),
+});
 export const updateParticipantInput = participantFields;
+export const updateGroupParticipantBillingInput = z.object({
+  billingAmount: participantBillingAmount,
+});
 
 export type AddParticipantInput = z.infer<typeof addParticipantInput>;
 export type UpdateParticipantInput = z.infer<typeof updateParticipantInput>;
+export type UpdateGroupParticipantBillingInput = z.infer<typeof updateGroupParticipantBillingInput>;
+
+export class ParticipantBillingCheckoutPendingError extends Error {
+  constructor() {
+    super("Não é possível alterar o valor enquanto houver checkout em andamento para este participante no grupo");
+    this.name = "ParticipantBillingCheckoutPendingError";
+  }
+}
 
 async function upsertFinancialContact(
   tx: TransactionClient,
@@ -182,6 +204,7 @@ export async function listGroupParticipants(organizationId: string, groupId: str
       name: participants.name,
       phoneDisplay: financialContacts.phoneDisplay,
       billingStartsOn: groupParticipants.billingStartsOn,
+      billingAmount: groupParticipants.billingAmount,
     })
     .from(groupParticipants)
     .innerJoin(participants, eq(groupParticipants.participantId, participants.id))
@@ -264,6 +287,7 @@ export async function addParticipantToGroup(
       await tx.insert(groupParticipants).values({
         groupId,
         participantId: participant.id,
+        billingAmount: input.billingAmount ?? cycle.group.defaultAmount,
         joinedAt: now,
         billingStartsOn: cycle.billingStartsOn,
         participantNameNormalized: nameNormalized,
@@ -309,6 +333,7 @@ export async function linkParticipantToGroup(
         .values({
           groupId,
           participantId,
+          billingAmount: cycle.group.defaultAmount,
           joinedAt: now,
           billingStartsOn: cycle.billingStartsOn,
           participantNameNormalized: participant.nameNormalized,
@@ -321,6 +346,114 @@ export async function linkParticipantToGroup(
     if (isUniqueViolation(error)) throw new ParticipantNameConflictError();
     throw error;
   }
+}
+
+/**
+ * Atualiza o valor do participante apenas no grupo informado. A mesma
+ * transação recalcula cobranças ainda abertas; cobranças históricas nunca
+ * são reescritas e uma reserva de checkout bloqueia toda a operação.
+ */
+export async function updateGroupParticipantBillingAmount(
+  organizationId: string,
+  groupId: string,
+  participantId: string,
+  rawInput: UpdateGroupParticipantBillingInput,
+) {
+  const input = updateGroupParticipantBillingInput.parse(rawInput);
+
+  return db.transaction(async (tx) => {
+    // Serializa edições do mesmo vínculo e garante o tenant antes de ler
+    // ou alterar qualquer valor.
+    await tx.execute(sql`
+      select gp.id
+      from group_participants gp
+      inner join groups g on g.id = gp.group_id
+      inner join participants p on p.id = gp.participant_id
+      where gp.group_id = ${groupId}
+        and gp.participant_id = ${participantId}
+        and gp.status = 'active'
+        and g.organization_id = ${organizationId}
+        and p.organization_id = ${organizationId}
+      for update of gp
+    `);
+
+    const [membership] = await tx
+      .select({ id: groupParticipants.id })
+      .from(groupParticipants)
+      .innerJoin(groups, eq(groupParticipants.groupId, groups.id))
+      .innerJoin(participants, eq(groupParticipants.participantId, participants.id))
+      .where(
+        and(
+          eq(groupParticipants.groupId, groupId),
+          eq(groupParticipants.participantId, participantId),
+          eq(groupParticipants.status, "active"),
+          eq(groups.organizationId, organizationId),
+          eq(participants.organizationId, organizationId),
+        ),
+      )
+      .limit(1);
+    if (!membership) return null;
+
+    // O lock das cobranças coordena esta edição com a reserva atômica
+    // feita pelo checkout (open -> checkout_pending).
+    await tx.execute(sql`
+      select c.id
+      from charges c
+      inner join billing_periods bp on bp.id = c.billing_period_id
+      inner join groups g on g.id = bp.group_id
+      where bp.group_id = ${groupId}
+        and c.participant_id = ${participantId}
+        and c.status in ('open', 'checkout_pending')
+        and g.organization_id = ${organizationId}
+      order by c.id
+      for update of c
+    `);
+
+    const currentCharges = await tx
+      .select({ id: charges.id, status: charges.status })
+      .from(charges)
+      .innerJoin(billingPeriods, eq(charges.billingPeriodId, billingPeriods.id))
+      .innerJoin(groups, eq(billingPeriods.groupId, groups.id))
+      .where(
+        and(
+          eq(billingPeriods.groupId, groupId),
+          eq(charges.participantId, participantId),
+          inArray(charges.status, ["open", "checkout_pending"]),
+          eq(groups.organizationId, organizationId),
+        ),
+      );
+
+    if (currentCharges.some((charge) => charge.status === "checkout_pending")) {
+      throw new ParticipantBillingCheckoutPendingError();
+    }
+
+    const openChargeIds = currentCharges.map((charge) => charge.id);
+    let updatedOpenCharges = 0;
+    if (openChargeIds.length > 0) {
+      const updated = await tx
+        .update(charges)
+        .set({
+          originalAmount: input.billingAmount,
+          totalAmount: sql`${input.billingAmount} - ${charges.discountAmount} + ${charges.fineAmount} + ${charges.interestAmount}`,
+          updatedAt: new Date(),
+        })
+        .where(and(inArray(charges.id, openChargeIds), eq(charges.status, "open")))
+        .returning({ id: charges.id });
+      updatedOpenCharges = updated.length;
+    }
+
+    const [updatedMembership] = await tx
+      .update(groupParticipants)
+      .set({ billingAmount: input.billingAmount })
+      .where(and(eq(groupParticipants.id, membership.id), eq(groupParticipants.status, "active")))
+      .returning({
+        participantId: groupParticipants.participantId,
+        billingAmount: groupParticipants.billingAmount,
+      });
+
+    if (!updatedMembership) return null;
+    return { participant: updatedMembership, updatedOpenCharges };
+  });
 }
 
 export async function unlinkParticipantFromGroup(

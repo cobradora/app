@@ -31,11 +31,14 @@
 html {
   scroll-behavior: smooth;
   background: var(--cream);
+  overflow-x: clip;
 }
 
 body {
   min-width: 320px;
+  max-width: 100%;
   margin: 0;
+  overflow-x: clip;
   color: var(--ink);
   background: var(--cream);
   font-family: var(--font-body);
@@ -48,8 +51,24 @@ button,
 input,
 select,
 textarea {
+  min-width: 0;
   color: inherit;
   font: inherit;
+}
+
+button,
+a,
+label,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a,
+select {
+  touch-action: manipulation;
 }
 
 button,
@@ -1278,6 +1297,33 @@ ul {
   white-space: nowrap;
 }
 
+.participant-button__billing {
+  min-width: 112px;
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  color: var(--brown);
+  white-space: nowrap;
+}
+
+.participant-button__billing small {
+  color: var(--muted);
+  font-size: 0.59rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.participant-button__billing strong {
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.participant-button__edit {
+  flex: 0 0 auto;
+}
+
 .participant-settle {
   flex: 0 0 auto;
 }
@@ -1374,6 +1420,14 @@ ul {
 
 .input-prefix input:focus {
   box-shadow: none;
+}
+
+.field-hint {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .form-error,
@@ -1968,10 +2022,11 @@ ul {
 
   .group-drawer {
     width: 100%;
-    height: min(94dvh, 900px);
-    margin-top: auto;
+    height: 100vh;
+    height: 100dvh;
+    margin: 0;
     border-left: 0;
-    border-radius: 28px 28px 0 0;
+    border-radius: 0;
     animation-name: sheet-in;
   }
 
@@ -1987,6 +2042,10 @@ ul {
   .drawer-body {
     padding-left: 18px;
     padding-right: 18px;
+  }
+
+  .drawer-header {
+    padding-top: max(18px, env(safe-area-inset-top));
   }
 }
 
@@ -2128,8 +2187,30 @@ ul {
     flex-basis: 36px;
   }
 
-  .participant-button__amount {
-    display: none;
+  .participant-button {
+    width: 100%;
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .participant-button__main {
+    grid-column: 3;
+  }
+
+  .participant-button__billing {
+    min-width: 0;
+    grid-column: 3 / -1;
+    justify-self: start;
+    justify-items: start;
+    padding: 5px 9px;
+    border-radius: 10px;
+    background: var(--pink-pale);
+  }
+
+  .participant-button__edit {
+    grid-column: 4;
+    grid-row: 1;
   }
 
   .modal-backdrop {
@@ -2140,7 +2221,8 @@ ul {
   .modal-card,
   .modal-card--wide {
     width: 100%;
-    max-height: 92dvh;
+    max-height: 96vh;
+    max-height: 96dvh;
     padding: 22px 18px max(24px, env(safe-area-inset-bottom));
     border-radius: 26px 26px 0 0;
   }
@@ -2204,9 +2286,15 @@ ul {
     margin-left: auto;
   }
 
-  .summary-card {
-    display: grid;
-    gap: 10px;
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-card,
+  .summary-card--expected {
+    grid-column: auto;
+    display: flex;
+    gap: 12px;
   }
 
   .summary-card strong {
@@ -2217,8 +2305,7 @@ ul {
     min-height: 2.1em;
   }
 
-  .footer-brand small,
-  .footer-link {
+  .footer-brand small {
     display: none;
   }
 
@@ -2232,6 +2319,557 @@ ul {
 
   .drawer-metrics span {
     font-size: 0.6rem;
+  }
+}
+
+/* Camada mobile profunda: 320px, áreas seguras, teclado e conteúdo longo. */
+@media (max-width: 720px) {
+  .app-header {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .app-header__inner,
+  .dashboard-main,
+  .app-footer__inner {
+    max-width: 100%;
+  }
+
+  .month-picker,
+  .month-picker select,
+  .button--small,
+  .icon-button,
+  .inline-alert button {
+    min-height: 44px;
+  }
+
+  .icon-button,
+  .inline-alert button {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+  }
+
+  .dashboard-main {
+    padding-bottom: 54px;
+  }
+
+  .surface,
+  .settings-section {
+    scroll-margin-top: calc(84px + env(safe-area-inset-top));
+  }
+
+  .summary-card,
+  .setting-card,
+  .pending-row,
+  .group-badge,
+  .message-preview,
+  .locked-list,
+  .locked-list__rows {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .summary-card strong,
+  .drawer-metrics strong,
+  .setting-card h3,
+  .section-heading h2,
+  .section-heading h3,
+  .drawer-header h2,
+  .drawer-header > div > span,
+  .modal-header h2 {
+    overflow-wrap: anywhere;
+  }
+
+  .app-footer__inner {
+    align-items: stretch;
+    gap: 14px;
+    padding-top: 24px;
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+  }
+
+  .footer-brand {
+    flex: 1 1 auto;
+  }
+
+  .footer-nav {
+    flex: 1 1 100%;
+    order: 2;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
+
+  .footer-nav .footer-link {
+    min-height: 44px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--white);
+  }
+
+  .footer-user {
+    order: 3;
+  }
+
+  .drawer-header {
+    position: relative;
+    z-index: 2;
+    flex: 0 0 auto;
+  }
+
+  .drawer-header > div {
+    min-width: 0;
+  }
+
+  .drawer-body {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+    padding-bottom: max(32px, env(safe-area-inset-bottom));
+  }
+
+  .modal-card {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-gutter: stable;
+  }
+
+  .modal-card input,
+  .modal-card select,
+  .modal-card textarea,
+  .message-fields textarea,
+  .auth-input input,
+  .checkout-input input {
+    font-size: 16px;
+  }
+
+  .auth-page {
+    min-height: 100svh;
+    padding-top: max(20px, env(safe-area-inset-top));
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+
+  .auth-card,
+  .checkout-card {
+    max-width: 100%;
+  }
+
+  .checkout-fixed {
+    min-height: 100svh;
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    padding-left: max(12px, env(safe-area-inset-left));
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  .checkout-card h1,
+  .checkout-sub,
+  .checkout-hint,
+  .charge-info strong,
+  .charge-info small {
+    overflow-wrap: anywhere;
+  }
+
+  .charge-row {
+    min-height: 58px;
+  }
+}
+
+@media (max-width: 540px) {
+  .section-heading:not(.section-heading--outside) {
+    align-items: flex-start;
+  }
+
+  .section-heading > div {
+    min-width: 0;
+  }
+
+  .group-badge strong,
+  .group-badge small,
+  .pending-row__person strong,
+  .pending-row__person span,
+  .participant-button__main strong,
+  .participant-button__main small {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .pending-row {
+    align-items: start;
+  }
+
+  .pending-row__amount,
+  .pending-row .status-pill {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .message-preview__top {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 12px;
+  }
+
+  .message-preview__top select {
+    width: 100%;
+    max-width: none;
+    min-height: 44px;
+  }
+
+  .locked-list,
+  .locked-list__rows {
+    overflow-wrap: anywhere;
+  }
+
+  .footer-brand {
+    width: 100%;
+  }
+
+  .footer-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .footer-nav .footer-link {
+    justify-content: center;
+    text-align: center;
+  }
+
+  .footer-user {
+    min-width: 0;
+  }
+
+  .footer-user > div {
+    flex: 1;
+  }
+
+  .footer-user > div strong {
+    max-width: min(42vw, 170px);
+  }
+
+  .participant-list > li {
+    align-items: stretch;
+  }
+
+  .participant-button {
+    min-height: 72px;
+  }
+
+  .participant-button__billing {
+    white-space: normal;
+  }
+
+  .modal-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .modal-actions .button {
+    width: 100%;
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .import-list {
+    max-height: min(40dvh, 300px);
+  }
+
+  .import-row {
+    align-items: start;
+    padding: 12px 10px;
+  }
+
+  .import-row > input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+    margin: 10px 0;
+  }
+
+  .import-row > input[type="tel"] {
+    min-height: 44px;
+  }
+
+  .checkout-logo img {
+    max-width: min(180px, 72vw);
+    height: auto !important;
+  }
+
+  .checkout-hint {
+    line-height: 1.45;
+  }
+}
+
+@media (max-width: 390px) {
+  .app-header__inner {
+    gap: 8px;
+  }
+
+  .brand {
+    flex: 0 0 auto;
+  }
+
+  .brand__mark {
+    width: 40px;
+    height: 40px;
+  }
+
+  .month-picker {
+    min-width: 0;
+    flex: 1;
+    justify-content: flex-end;
+    padding: 4px;
+  }
+
+  .month-picker > svg {
+    margin-left: 6px;
+  }
+
+  .month-picker select {
+    width: 100%;
+    max-width: none;
+    padding-right: 22px;
+  }
+
+  .dashboard-main {
+    padding-top: 24px;
+  }
+
+  .welcome {
+    gap: 18px;
+  }
+
+  .welcome h1 {
+    font-size: clamp(1.9rem, 11vw, 2.35rem);
+  }
+
+  .surface,
+  .setting-card {
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .summary-card {
+    padding: 16px;
+  }
+
+  .drawer-header,
+  .drawer-body {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .drawer-header {
+    gap: 10px;
+  }
+
+  .drawer-header h2 {
+    font-size: 1.45rem;
+  }
+
+  .drawer-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .drawer-metrics > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .drawer-metrics strong {
+    margin-top: 0;
+    text-align: right;
+  }
+
+  .inline-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .participant-button {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .participant-button > .status-dot {
+    display: none;
+  }
+
+  .participant-button .person-avatar {
+    grid-column: 1;
+  }
+
+  .participant-button__main {
+    grid-column: 2;
+  }
+
+  .participant-button__billing {
+    grid-column: 2 / -1;
+  }
+
+  .participant-button__edit {
+    grid-column: 3;
+  }
+
+  .modal-card,
+  .modal-card--wide {
+    max-height: calc(100dvh - env(safe-area-inset-top));
+    padding-right: 14px;
+    padding-left: 14px;
+    border-radius: 22px 22px 0 0;
+  }
+
+  .modal-header {
+    position: sticky;
+    z-index: 2;
+    top: -22px;
+    margin: -22px -14px 14px;
+    padding: 18px 14px 10px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.97);
+  }
+
+  .modal-header h2 {
+    font-size: 1.12rem;
+  }
+
+  .field-grid,
+  .modal-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-page {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .auth-card {
+    padding: 22px 14px;
+    border-radius: 22px;
+  }
+
+  .auth-brand {
+    max-width: 100%;
+  }
+
+  .auth-brand small {
+    font-size: 0.62rem;
+  }
+
+  .auth-heading {
+    margin-top: 22px;
+  }
+
+  .checkout-fixed {
+    padding-right: max(8px, env(safe-area-inset-right));
+    padding-left: max(8px, env(safe-area-inset-left));
+  }
+
+  .checkout-card {
+    padding: 22px 14px;
+    border-radius: 22px;
+  }
+
+  .charge-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    padding: 12px 10px;
+  }
+
+  .charge-row input[type="checkbox"] {
+    width: 22px;
+    height: 22px;
+  }
+
+  .charge-amount {
+    grid-column: 2;
+    justify-self: start;
+    padding: 4px 8px;
+    border-radius: 9px;
+    background: var(--pink-pale);
+  }
+}
+
+@media (max-width: 340px) {
+  .app-header__inner,
+  .dashboard-main,
+  .app-footer__inner {
+    width: calc(100% - 16px);
+  }
+
+  .month-picker > svg {
+    display: none;
+  }
+
+  .footer-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .footer-user {
+    flex-wrap: wrap;
+  }
+
+  .footer-user .button {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .inline-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-height: 560px) and (orientation: landscape) {
+  .app-header__inner {
+    min-height: 60px;
+  }
+
+  .dashboard-main {
+    padding-top: 22px;
+  }
+
+  .group-drawer,
+  .modal-card,
+  .modal-card--wide {
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .drawer-header {
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: 12px;
+  }
+
+  .modal-backdrop {
+    align-items: stretch;
+  }
+
+  .modal-card,
+  .modal-card--wide {
+    width: min(680px, 100%);
+    padding-top: 16px;
+  }
+
+  .modal-header {
+    top: -16px;
+    margin-top: -16px;
+  }
+
+  .auth-page,
+  .checkout-fixed {
+    align-items: flex-start;
+  }
+
+  .auth-card,
+  .checkout-card {
+    margin-top: max(8px, env(safe-area-inset-top));
+    margin-bottom: max(8px, env(safe-area-inset-bottom));
   }
 }
 

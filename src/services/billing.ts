@@ -55,7 +55,10 @@ export async function generateBillingPeriod(
     }
 
     const eligibleParticipants = await tx
-      .select({ participantId: groupParticipants.participantId })
+      .select({
+        participantId: groupParticipants.participantId,
+        billingAmount: groupParticipants.billingAmount,
+      })
       .from(groupParticipants)
       .innerJoin(
         participants,
@@ -84,11 +87,11 @@ export async function generateBillingPeriod(
         eligibleParticipants.map((link) => ({
           billingPeriodId: period.id,
           participantId: link.participantId,
-          originalAmount: group.defaultAmount,
+          originalAmount: link.billingAmount,
           discountAmount: 0,
           fineAmount: 0,
           interestAmount: 0,
-          totalAmount: group.defaultAmount,
+          totalAmount: link.billingAmount,
           dueDate: period.dueDate,
         })),
       );
