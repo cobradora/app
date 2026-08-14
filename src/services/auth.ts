@@ -42,3 +42,11 @@ export async function signUp(rawInput: SignUpInput) {
     return { organization, user };
   });
 }
+
+export async function getUserById(userId: string) {
+  const [user] = await db
+    .select({ id: users.id, name: users.name, email: users.email, role: users.role })
+    .from(users)
+    .where(eq(users.id, userId));
+  return user ?? null;
+}

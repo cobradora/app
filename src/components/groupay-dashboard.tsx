@@ -121,7 +121,22 @@ const navItems: { id: ViewId; label: string; icon: typeof LayoutDashboard }[] = 
   { id: "charges", label: "Cobrança", icon: WalletCards },
 ];
 
-export default function GroupayDashboard() {
+type DashboardUser = { name: string; role: "owner" | "admin" | "member" };
+
+const ROLE_LABELS: Record<DashboardUser["role"], string> = {
+  owner: "Organizador",
+  admin: "Administrador",
+  member: "Membro",
+};
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+export default function GroupayDashboard({ user }: { user: DashboardUser }) {
   const router = useRouter();
   const [view, setView] = useState<ViewId>("overview");
   const [groups, setGroups] = useState<Group[]>([]);
@@ -949,7 +964,7 @@ export default function GroupayDashboard() {
         <div className="side-end">
           <button className={view === "settings" ? "nav on" : "nav"} onClick={() => go("settings")}><Settings size={17} strokeWidth={1.7} /> Configurações</button>
           <button className="nav" onClick={handleLogout}><LogOut size={17} strokeWidth={1.7} /> Sair</button>
-          <div className="me"><span>LM</span><div><strong>Lucas Martins</strong><small>Organizador</small></div></div>
+          <div className="me"><span>{getInitials(user.name)}</span><div><strong>{user.name}</strong><small>{ROLE_LABELS[user.role]}</small></div></div>
         </div>
       </aside>
 

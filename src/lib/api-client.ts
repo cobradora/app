@@ -4,13 +4,30 @@
 
 type ApiErrorBody = { error?: string; issues?: { message: string }[]; message?: string };
 
+/**
+ * Le o corpo da resposta com seguranca: um 500 sem corpo (comum quando o
+ * servidor cai antes de montar um JSON de erro, ex. falha de conexao com o
+ * banco) nao pode virar um SyntaxError cru de `response.json()` no chamador.
+ */
+async function parseResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) {
+    throw new Error(`Resposta vazia do servidor (${response.status} ${response.statusText})`.trim());
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Resposta invalida do servidor (${response.status}): ${text.slice(0, 200)}`);
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
 
-  const data = await response.json();
+  const data = await parseResponseBody(response);
 
   if (!response.ok) {
     const errorBody = data as ApiErrorBody;
@@ -263,7 +280,7 @@ export const apiClient = {
       return null;
     }
 
-    const data = await response.json();
+    const data = await parseResponseBody(response);
     if (!response.ok) {
       const errorBody = data as ApiErrorBody;
       const message = errorBody.issues?.[0]?.message ?? errorBody.message ?? errorBody.error ?? "Erro desconhecido";
