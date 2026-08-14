@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireOrganization, UnauthorizedError } from "@/lib/auth-context";
+import { requireAdmin, requireOrganization, ForbiddenError, UnauthorizedError } from "@/lib/auth-context";
 import { getInfinitePayAccount, setInfinitePayHandle, setInfinitePayHandleInput } from "@/services/gateway-accounts";
 import { z } from "zod";
 
@@ -18,7 +18,7 @@ export async function GET() {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const session = await requireOrganization();
+    const session = await requireAdmin();
     const input = setInfinitePayHandleInput.parse(await request.json());
 
     const account = await setInfinitePayHandle(session.organizationId, input);
@@ -26,6 +26,9 @@ export async function PATCH(request: NextRequest) {
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    if (err instanceof ForbiddenError) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: "validation_error", issues: err.issues }, { status: 400 });

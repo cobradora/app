@@ -8,6 +8,9 @@ import {
   pgEnum,
   unique,
   uniqueIndex,
+  index,
+  check,
+  foreignKey,
   jsonb,
   text,
 } from "drizzle-orm/pg-core";
@@ -19,6 +22,7 @@ export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "member"]);
 export const userStatusEnum = pgEnum("user_status", ["active", "inactive"]);
 export const groupStatusEnum = pgEnum("group_status", ["active", "archived"]);
 export const participantStatusEnum = pgEnum("participant_status", ["active", "inactive"]);
+export const financialRoleEnum = pgEnum("financial_role", ["responsible", "dependent"]);
 export const groupParticipantStatusEnum = pgEnum("group_participant_status", ["active", "left"]);
 export const billingPeriodStatusEnum = pgEnum("billing_period_status", ["open", "closed"]);
 export const chargeStatusEnum = pgEnum("charge_status", [
@@ -66,6 +70,17 @@ export const organizations = pgTable("organizations", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// ---------- organization_settings ----------
+export const organizationSettings = pgTable("organization_settings", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organizations.id),
+  messageIntro: varchar("message_intro", { length: 1000 }).notNull().default(""),
+  messageOutro: varchar("message_outro", { length: 1000 }).notNull().default(""),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // ---------- users ----------
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -90,17 +105,56 @@ export const groups = pgTable("groups", {
   status: groupStatusEnum("status").notNull().default("active"),
 }, (table) => ({
   slugUnique: uniqueIndex("groups_public_slug_unique").on(table.publicSlug),
+  organizationIdentityUnique: uniqueIndex("groups_organization_id_id_unique")
+    .on(table.organizationId, table.id),
+  organizationStatusIndex: index("groups_organization_status_idx").on(table.organizationId, table.status),
+  billingDayCheck: check("groups_billing_day_check", sql`${table.billingDay} between 1 and 28`),
+  defaultAmountCheck: check("groups_default_amount_check", sql`${table.defaultAmount} > 0`),
+}));
+
+// ---------- financial_contacts ----------
+export const financialContacts = pgTable("financial_contacts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  phoneNormalized: varchar("phone_normalized", { length: 14 }).notNull(),
+  phoneDisplay: varchar("phone_display", { length: 20 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationPhoneUnique: uniqueIndex("financial_contacts_organization_phone_unique")
+    .on(table.organizationId, table.phoneNormalized),
+  organizationIdentityUnique: uniqueIndex("financial_contacts_organization_id_id_unique")
+    .on(table.organizationId, table.id),
+  phoneCheck: check("financial_contacts_phone_check", sql`${table.phoneNormalized} ~ '^\\+55[1-9][0-9]9[0-9]{8}$'`),
 }));
 
 // ---------- participants ----------
 export const participants = pgTable("participants", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  financialContactId: uuid("financial_contact_id").notNull().references(() => financialContacts.id),
   name: varchar("name", { length: 200 }).notNull(),
-  phoneNormalized: varchar("phone_normalized", { length: 20 }).notNull(),
-  phoneDisplay: varchar("phone_display", { length: 30 }).notNull(),
+  nameNormalized: varchar("name_normalized", { length: 200 }).notNull(),
+  financialRole: financialRoleEnum("financial_role").notNull(),
+  // Colunas legadas mantidas temporariamente para um rollout aditivo. Novas
+  // escritas usam financial_contacts; uma migration futura pode removê-las.
+  legacyPhoneNormalized: varchar("phone_normalized", { length: 20 }),
+  legacyPhoneDisplay: varchar("phone_display", { length: 30 }),
   status: participantStatusEnum("status").notNull().default("active"),
-});
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  contactIndex: index("participants_financial_contact_idx").on(table.financialContactId),
+  organizationIdentityUnique: uniqueIndex("participants_organization_id_id_unique")
+    .on(table.organizationId, table.id),
+  organizationContactReference: foreignKey({
+    name: "participants_organization_financial_contact_fk",
+    columns: [table.organizationId, table.financialContactId],
+    foreignColumns: [financialContacts.organizationId, financialContacts.id],
+  }),
+  oneResponsiblePerContact: uniqueIndex("participants_financial_contact_responsible_unique")
+    .on(table.financialContactId)
+    .where(sql`${table.financialRole} = 'responsible'`),
+}));
 
 // ---------- group_participants ----------
 export const groupParticipants = pgTable("group_participants", {
@@ -108,6 +162,8 @@ export const groupParticipants = pgTable("group_participants", {
   groupId: uuid("group_id").notNull().references(() => groups.id),
   participantId: uuid("participant_id").notNull().references(() => participants.id),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
+  billingStartsOn: date("billing_starts_on").notNull(),
+  participantNameNormalized: varchar("participant_name_normalized", { length: 200 }).notNull(),
   leftAt: timestamp("left_at", { withTimezone: true }),
   status: groupParticipantStatusEnum("status").notNull().default("active"),
 }, (table) => ({
@@ -116,6 +172,9 @@ export const groupParticipants = pgTable("group_participants", {
   oneActivePerGroup: uniqueIndex("group_participants_active_unique")
     .on(table.groupId, table.participantId)
     .where(sql`status = 'active'`),
+  oneActiveNormalizedNamePerGroup: uniqueIndex("group_participants_active_name_unique")
+    .on(table.groupId, table.participantNameNormalized)
+    .where(sql`${table.status} = 'active'`),
 }));
 
 // ---------- billing_periods ----------
@@ -147,21 +206,68 @@ export const charges = pgTable("charges", {
   perParticipantUnique: unique("charges_period_participant_unique").on(table.billingPeriodId, table.participantId),
 }));
 
+// ---------- gateway_accounts ----------
+export const gatewayAccounts = pgTable("gateway_accounts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  provider: varchar("provider", { length: 40 }).notNull(),
+  externalAccountId: varchar("external_account_id", { length: 200 }).notNull(),
+  status: gatewayAccountStatusEnum("status").notNull().default("pending"),
+  configurationReference: varchar("configuration_reference", { length: 200 }),
+}, (table) => ({
+  organizationProviderUnique: uniqueIndex("gateway_accounts_organization_provider_unique")
+    .on(table.organizationId, table.provider),
+  organizationIdentityUnique: uniqueIndex("gateway_accounts_organization_id_id_unique")
+    .on(table.organizationId, table.id),
+}));
+
 // ---------- checkout_sessions ----------
 export const checkoutSessions = pgTable("checkout_sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id),
   participantId: uuid("participant_id").notNull().references(() => participants.id),
+  financialContactId: uuid("financial_contact_id").notNull().references(() => financialContacts.id),
+  gatewayAccountId: uuid("gateway_account_id").references(() => gatewayAccounts.id),
+  gatewayExternalAccountIdSnapshot: varchar("gateway_external_account_id_snapshot", { length: 200 }),
   gateway: varchar("gateway", { length: 40 }).notNull(),
   gatewayCheckoutId: varchar("gateway_checkout_id", { length: 200 }),
+  gatewayPaymentId: varchar("gateway_payment_id", { length: 200 }),
+  gatewayInvoiceSlug: varchar("gateway_invoice_slug", { length: 200 }),
   status: checkoutSessionStatusEnum("status").notNull().default("created"),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+  requestFingerprint: varchar("request_fingerprint", { length: 64 }),
   webhookTokenHash: varchar("webhook_token_hash", { length: 64 }),
+  recoveryTokenHash: varchar("recovery_token_hash", { length: 64 }),
+  externalCreationState: varchar("external_creation_state", { length: 24 }).notNull().default("not_started"),
+  externalRequestStartedAt: timestamp("external_request_started_at", { withTimezone: true }),
   checkoutUrl: varchar("checkout_url", { length: 500 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
-  idempotencyUnique: uniqueIndex("checkout_sessions_idempotency_unique").on(table.idempotencyKey),
+  idempotencyUnique: uniqueIndex("checkout_sessions_organization_idempotency_unique")
+    .on(table.organizationId, table.idempotencyKey),
+  financialContactIndex: index("checkout_sessions_financial_contact_idx").on(table.financialContactId),
+  requestFingerprintIndex: index("checkout_sessions_request_fingerprint_idx")
+    .on(table.organizationId, table.requestFingerprint),
+  organizationParticipantReference: foreignKey({
+    name: "checkout_sessions_organization_participant_fk",
+    columns: [table.organizationId, table.participantId],
+    foreignColumns: [participants.organizationId, participants.id],
+  }),
+  organizationContactReference: foreignKey({
+    name: "checkout_sessions_organization_financial_contact_fk",
+    columns: [table.organizationId, table.financialContactId],
+    foreignColumns: [financialContacts.organizationId, financialContacts.id],
+  }),
+  organizationGatewayAccountReference: foreignKey({
+    name: "checkout_sessions_organization_gateway_account_fk",
+    columns: [table.organizationId, table.gatewayAccountId],
+    foreignColumns: [gatewayAccounts.organizationId, gatewayAccounts.id],
+  }),
+  externalCreationStateCheck: check(
+    "checkout_sessions_external_creation_state_check",
+    sql`${table.externalCreationState} in ('not_started', 'in_flight', 'ambiguous', 'linked')`,
+  ),
 }));
 
 // ---------- checkout_items ----------
@@ -187,6 +293,11 @@ export const payments = pgTable("payments", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   gatewayPaymentUnique: uniqueIndex("payments_gateway_payment_unique").on(table.gatewayPaymentId),
+  organizationParticipantReference: foreignKey({
+    name: "payments_organization_participant_fk",
+    columns: [table.organizationId, table.participantId],
+    foreignColumns: [participants.organizationId, participants.id],
+  }),
 }));
 
 // ---------- payment_allocations ----------
@@ -195,17 +306,9 @@ export const paymentAllocations = pgTable("payment_allocations", {
   paymentId: uuid("payment_id").notNull().references(() => payments.id),
   chargeId: uuid("charge_id").notNull().references(() => charges.id),
   amount: integer("amount").notNull(),
-});
-
-// ---------- gateway_accounts ----------
-export const gatewayAccounts = pgTable("gateway_accounts", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
-  provider: varchar("provider", { length: 40 }).notNull(),
-  externalAccountId: varchar("external_account_id", { length: 200 }).notNull(),
-  status: gatewayAccountStatusEnum("status").notNull().default("pending"),
-  configurationReference: varchar("configuration_reference", { length: 200 }),
-});
+}, (table) => ({
+  chargeUnique: uniqueIndex("payment_allocations_charge_unique").on(table.chargeId),
+}));
 
 // ---------- commissions ----------
 export const commissions = pgTable("commissions", {

@@ -12,6 +12,7 @@ function baseInput(overrides: Partial<Parameters<ReturnType<typeof createInfinit
     gatewayExternalAccountId: "handle-teste",
     externalReference: "session-1",
     webhookToken: "token-1",
+    recoveryToken: "recovery-token-1",
     ...overrides,
   };
 }
@@ -81,6 +82,9 @@ describe("infinitepay adapter - createCheckout", () => {
     expect(body.handle).toBe("handle-teste");
     expect(body.order_nsu).toBe("session-1");
     expect(body.webhook_url).toContain("token=token-1");
+    expect(body.redirect_url).toContain("order_nsu=session-1");
+    expect(body.redirect_url).toContain("recovery_token=recovery-token-1");
+    expect(body.items[0].description).toBe("Cobrança CobraDora");
   });
 
   it("envia customer.name e customer.phone_number quando buyerName/buyerPhone sao informados", async () => {
@@ -129,6 +133,54 @@ describe("infinitepay adapter - createCheckout", () => {
     const [, options] = fetchMock.mock.calls[0];
     const body = JSON.parse((options as RequestInit).body as string);
     expect(body.customer).toBeUndefined();
+  });
+});
+
+describe("infinitepay adapter - payment_check", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  it("envia o contrato oficial completo e interpreta success+paid", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, paid: true, amount: 3210, capture_method: "pix" }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await createInfinitePayAdapter().getPayment({
+      gatewayPaymentId: "transaction-1",
+      gatewayExternalAccountId: "minha-tag",
+      externalReference: "order-1",
+      invoiceSlug: "invoice-1",
+    });
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse((options as RequestInit).body as string)).toEqual({
+      handle: "minha-tag",
+      order_nsu: "order-1",
+      transaction_nsu: "transaction-1",
+      slug: "invoice-1",
+    });
+    expect(result).toEqual(expect.objectContaining({ status: "confirmed", amount: 3210, paymentMethod: "pix" }));
+  });
+
+  it("nunca confirma quando paid=false", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, paid: false, amount: 3210 }),
+    }) as unknown as typeof fetch;
+
+    const result = await createInfinitePayAdapter().getPayment({
+      gatewayPaymentId: "transaction-2",
+      gatewayExternalAccountId: "minha-tag",
+      externalReference: "order-2",
+      invoiceSlug: "invoice-2",
+    });
+    expect(result.status).toBe("pending");
   });
 });
 

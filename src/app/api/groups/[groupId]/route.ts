@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireOrganization, UnauthorizedError } from "@/lib/auth-context";
+import { requireAdmin, ForbiddenError, UnauthorizedError } from "@/lib/auth-context";
 import { updateGroup, updateGroupInput, archiveGroup } from "@/services/groups";
 import { z } from "zod";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ groupId: string }> }) {
   try {
-    const session = await requireOrganization();
+    const session = await requireAdmin();
     const { groupId } = await params;
     const input = updateGroupInput.parse(await request.json());
 
@@ -18,6 +18,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
+    if (err instanceof ForbiddenError) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: "validation_error", issues: err.issues }, { status: 400 });
     }
@@ -27,7 +30,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ groupId: string }> }) {
   try {
-    const session = await requireOrganization();
+    const session = await requireAdmin();
     const { groupId } = await params;
 
     const group = await archiveGroup(session.organizationId, groupId);
@@ -38,6 +41,9 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    if (err instanceof ForbiddenError) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
     return NextResponse.json({ error: "group_has_outstanding_charges", message: (err as Error).message }, { status: 409 });
   }

@@ -66,7 +66,7 @@ async function seed() {
   console.log("Gateway account handle:", gatewayAccount.externalAccountId);
   console.log("Login:", user.email);
   console.log("Senha:", plainPassword);
-  console.log("Cookie groupay_session (opcional, para testes via curl):", token);
+  console.log("Cookie cobradora_session (opcional, para testes via curl):", token);
 }
 
 seed()

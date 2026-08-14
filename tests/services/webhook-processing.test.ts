@@ -16,7 +16,13 @@ import { generateBillingPeriod } from "@/services/billing";
 import { createCheckoutForCharges } from "@/services/checkout";
 import { truncateAll } from "../helpers/db";
 import { eq } from "drizzle-orm";
-import { processInfinitePayWebhook, InvalidWebhookSignatureError } from "@/services/webhook-processing";
+import {
+  processInfinitePayWebhook,
+  InvalidWebhookSignatureError,
+  WebhookReplayMismatchError,
+  checkInfinitePayPayment,
+} from "@/services/webhook-processing";
+import { deriveCheckoutToken } from "@/payments/session-tokens";
 
 // Nao mockamos @/payments aqui: queremos que createCheckoutForCharges use o
 // InfinitePayAdapter real (validateWebhook/parseWebhook reais, com lookup
@@ -67,8 +73,8 @@ describe("processInfinitePayWebhook", () => {
       .returning();
     groupPublicSlug = group.publicSlug;
 
-    const participant = await findOrCreateParticipantByPhone(organizationId, phone);
-    await linkParticipantToGroup(group.id, participant.id);
+    const participant = await findOrCreateParticipantByPhone(organizationId, phone, "Maria Responsável");
+    await linkParticipantToGroup(organizationId, group.id, participant.id, new Date("2026-07-01T12:00:00Z"));
 
     await db.insert(gatewayAccounts).values({
       organizationId,
@@ -77,7 +83,7 @@ describe("processInfinitePayWebhook", () => {
       status: "active",
     });
 
-    await generateBillingPeriod(group.id, "2026-08");
+    await generateBillingPeriod(organizationId, group.id, "2026-08");
   });
 
   afterEach(() => {
@@ -102,6 +108,7 @@ describe("processInfinitePayWebhook", () => {
       order_nsu: orderNsu,
       transaction_nsu: transactionNsu,
       amount,
+      invoice_slug: "invoice-test",
       capture_method: "pix",
     });
   }
@@ -209,6 +216,114 @@ describe("processInfinitePayWebhook", () => {
 
     const events = await db.select().from(webhookEvents).where(eq(webhookEvents.externalEventId, "txn-repetido-1"));
     expect(events).toHaveLength(1);
+  });
+
+  it("webhook tardio reconcilia sessao vinculada expirada sem criar um segundo checkout", async () => {
+    const { checkoutSessionId, totalChargesAmount, webhookToken } = await setupCheckoutSession(
+      "idem-webhook-expirado",
+    );
+    const [chargeBefore] = await db.select().from(charges);
+    await db
+      .update(checkoutSessions)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(checkoutSessions.id, checkoutSessionId));
+
+    await expect(
+      createCheckoutForCharges(groupPublicSlug, phone, [chargeBefore.id], "idem-webhook-expirado"),
+    ).rejects.toThrow(/reconciliada/);
+    const [released] = await db.select().from(charges).where(eq(charges.id, chargeBefore.id));
+    expect(released.status).toBe("open");
+
+    await processInfinitePayWebhook(
+      buildRawBody(checkoutSessionId, "txn-webhook-expirado", totalChargesAmount),
+      webhookToken,
+    );
+    const [paid] = await db.select().from(charges).where(eq(charges.id, chargeBefore.id));
+    expect(paid.status).toBe("paid");
+  });
+
+  it("rejeita o mesmo transaction_nsu quando o payload diverge do primeiro", async () => {
+    const { checkoutSessionId, totalChargesAmount, webhookToken } = await setupCheckoutSession(
+      "idem-webhook-replay-divergente",
+    );
+    const firstPayload = buildRawBody(checkoutSessionId, "txn-replay-divergente", totalChargesAmount);
+    await processInfinitePayWebhook(firstPayload, webhookToken);
+
+    const divergentPayload = JSON.stringify({
+      ...JSON.parse(firstPayload),
+      receipt_url: "https://comprovante.example/alterado",
+    });
+    await expect(processInfinitePayWebhook(divergentPayload, webhookToken)).rejects.toThrow(
+      WebhookReplayMismatchError,
+    );
+    expect(await db.select().from(payments)).toHaveLength(1);
+  });
+
+  it("payment_check confirmado usa a mesma transacao de confirmacao e marca apenas apos resposta paid=true", async () => {
+    const { checkoutSessionId, totalChargesAmount } = await setupCheckoutSession("idem-payment-check-ok");
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, paid: true, amount: totalChargesAmount, capture_method: "pix" }),
+    }) as unknown as typeof fetch;
+
+    const result = await checkInfinitePayPayment({
+      sessionId: checkoutSessionId,
+      recoveryToken: deriveCheckoutToken(checkoutSessionId, "recovery"),
+      transactionNsu: "txn-payment-check-1",
+      invoiceSlug: "invoice-payment-check-1",
+    });
+
+    expect(result.status).toBe("confirmed");
+    const [charge] = await db.select().from(charges);
+    expect(charge.status).toBe("paid");
+    const [payment] = await db.select().from(payments).where(eq(payments.gatewayPaymentId, "txn-payment-check-1"));
+    expect(payment.status).toBe("confirmed");
+  });
+
+  it("payment_check usa o handle congelado na sessao mesmo se a configuracao mudar e for desativada", async () => {
+    const { checkoutSessionId, totalChargesAmount } = await setupCheckoutSession("idem-payment-check-snapshot");
+    await db
+      .update(gatewayAccounts)
+      .set({ externalAccountId: "handle-alterado", status: "disabled" })
+      .where(eq(gatewayAccounts.organizationId, organizationId));
+    const paymentCheckFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, paid: false, amount: totalChargesAmount }),
+    });
+    global.fetch = paymentCheckFetch as unknown as typeof fetch;
+
+    const result = await checkInfinitePayPayment({
+      sessionId: checkoutSessionId,
+      recoveryToken: deriveCheckoutToken(checkoutSessionId, "recovery"),
+      transactionNsu: "txn-payment-check-snapshot",
+      invoiceSlug: "invoice-payment-check-snapshot",
+    });
+
+    expect(result.status).toBe("pending");
+    const [, init] = paymentCheckFetch.mock.calls[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual(
+      expect.objectContaining({ handle: "handle-teste", order_nsu: checkoutSessionId }),
+    );
+  });
+
+  it("payment_check paid=false nao altera a cobranca para paga", async () => {
+    const { checkoutSessionId, totalChargesAmount } = await setupCheckoutSession("idem-payment-check-pendente");
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, paid: false, amount: totalChargesAmount }),
+    }) as unknown as typeof fetch;
+
+    const result = await checkInfinitePayPayment({
+      sessionId: checkoutSessionId,
+      recoveryToken: deriveCheckoutToken(checkoutSessionId, "recovery"),
+      transactionNsu: "txn-payment-check-pendente",
+      invoiceSlug: "invoice-payment-check-pendente",
+    });
+
+    expect(result.status).toBe("pending");
+    const [charge] = await db.select().from(charges);
+    expect(charge.status).toBe("checkout_pending");
+    expect(await db.select().from(payments)).toHaveLength(0);
   });
 
   it("order_nsu desconhecido (sessao inexistente) lanca erro e nao altera nenhuma charge", async () => {

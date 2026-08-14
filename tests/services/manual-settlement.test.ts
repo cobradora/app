@@ -24,8 +24,8 @@ describe("manual settlement", () => {
       .returning();
 
     const participant = await findOrCreateParticipantByPhone(organizationId, "(21) 90000-0007");
-    await linkParticipantToGroup(group.id, participant.id);
-    const period = await generateBillingPeriod(group.id, "2026-08");
+    await linkParticipantToGroup(organizationId, group.id, participant.id, new Date("2026-08-01T12:00:00Z"));
+    const period = await generateBillingPeriod(organizationId, group.id, "2026-08");
 
     const [charge] = await db.select().from(charges).where(eq(charges.billingPeriodId, period.id));
     chargeId = charge.id;

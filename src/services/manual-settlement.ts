@@ -1,6 +1,14 @@
 import { db } from "@/db";
-import { charges, payments, paymentAllocations, auditEvents } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import {
+  charges,
+  billingPeriods,
+  groups,
+  participants,
+  payments,
+  paymentAllocations,
+  auditEvents,
+} from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 export const manualSettlementInput = z.object({
@@ -18,13 +26,30 @@ export async function registerManualSettlement(
 ) {
   const input = manualSettlementInput.parse(rawInput);
 
-  const [charge] = await db.select().from(charges).where(eq(charges.id, chargeId));
-  if (!charge) throw new Error("Cobrança não encontrada");
-  if (charge.status === "paid" || charge.status === "manually_paid") {
-    throw new Error("Cobrança já está paga — use um evento de estorno para corrigir, não uma nova baixa");
-  }
-
   await db.transaction(async (tx) => {
+    const [charge] = await tx
+      .select({
+        id: charges.id,
+        participantId: charges.participantId,
+        totalAmount: charges.totalAmount,
+      })
+      .from(charges)
+      .innerJoin(billingPeriods, eq(charges.billingPeriodId, billingPeriods.id))
+      .innerJoin(groups, eq(billingPeriods.groupId, groups.id))
+      .innerJoin(participants, eq(charges.participantId, participants.id))
+      .where(
+        and(
+          eq(charges.id, chargeId),
+          eq(charges.status, "open"),
+          eq(groups.organizationId, organizationId),
+          eq(participants.organizationId, organizationId),
+        ),
+      )
+      .for("update");
+    if (!charge) {
+      throw new Error("Cobrança não encontrada ou indisponível para baixa manual");
+    }
+
     const [payment] = await tx
       .insert(payments)
       .values({
@@ -44,10 +69,14 @@ export async function registerManualSettlement(
       amount: charge.totalAmount,
     });
 
-    await tx
+    const updated = await tx
       .update(charges)
       .set({ status: "manually_paid", updatedAt: new Date() })
-      .where(eq(charges.id, charge.id));
+      .where(and(eq(charges.id, charge.id), eq(charges.status, "open")))
+      .returning({ id: charges.id });
+    if (updated.length !== 1) {
+      throw new Error("Cobrança alterada por outra operação; tente novamente");
+    }
 
     await tx.insert(auditEvents).values({
       organizationId,

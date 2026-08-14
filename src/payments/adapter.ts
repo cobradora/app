@@ -10,8 +10,16 @@ export type CreateCheckoutInput = {
   gatewayExternalAccountId?: string; // handle InfinitePay da organizacao (gatewayAccounts.externalAccountId)
   externalReference?: string; // id da checkoutSession ja persistida, usado como order_nsu
   webhookToken?: string; // segredo em claro (base64url) gerado pelo service; o adapter nao o persiste, so o embute na webhook_url
+  recoveryToken?: string; // segredo em claro usado apenas na redirect_url para recuperar/confirmar o checkout no retorno
   buyerName?: string; // nome do participante, para pre-preencher customer.name na InfinitePay
   buyerPhone?: string; // participants.phoneNormalized (+55DDDNNNNNNNNN), para pre-preencher customer.phone_number
+};
+
+export type GetPaymentInput = {
+  gatewayPaymentId: string;
+  gatewayExternalAccountId?: string;
+  externalReference?: string;
+  invoiceSlug?: string;
 };
 
 export type CreateCheckoutResult = {
@@ -35,7 +43,7 @@ export type ParsedWebhookEvent = {
 
 export interface PaymentsAdapter {
   createCheckout(input: CreateCheckoutInput): Promise<CreateCheckoutResult>;
-  getPayment(gatewayPaymentId: string): Promise<GatewayPayment>;
+  getPayment(input: GetPaymentInput): Promise<GatewayPayment>;
   refundPayment(gatewayPaymentId: string, amount?: number): Promise<void>;
   // Retorno assincrono porque o InfinitePayAdapter precisa consultar o
   // webhookTokenHash da checkoutSession no banco (segredo por sessao, nao

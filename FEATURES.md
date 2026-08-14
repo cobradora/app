@@ -1,24 +1,14 @@
-FEATURES
+# CobraDora — escopo implementado
 
-## GRUPOS
-
-- REMOVER BUTTON CLASSS MINI DARK "ABRIR" E TRNASFORMAR OS BADGES DE CADA GRUPO EM CAMPOS CLICÁVEIS PARA ABRIR A TELA QUE ATUALMENTE É ABERTA QUANDO CLICADA EM "ABRIR"
-- NA SESSÃO DOS PARTICIPANTES OS BADGES DOS PARTICIPANTES DEVEM SER CLICADAS PARA ABRIR UM MODAL DE EDIÇÃO OU EXCLUSÃO
-- O BOTÃO LINK DE PAGAMENTO DEVE SER REMOVIDO
-- INCLUIR UM BOTÃO PARA EDITAR NOME DO GRUPO OU REMOVER O GRUPO
-- OPÇÃO PARA USUÁRIO IMPORTAR UMA LISTA DE PARTICIPANTES, IGNORANDO PREFIXOS DE NÚMEROS E PONTUAÇÃO, EXEMPLO:
-1. JOÃO
-2. FELIPE
-3. ALFREDO
-4 - MARCELO
-5- OTAVIO
-- MATHEUS
-
-O SISTEMA DEVE MAPEAR OS NOMES E CONFIRMAR COM O USUÁRIO QUAIS NOMES MAPEADOS ELE DESEJA INCLUIR ATRAVÉS DE CHECKBOX E INCLUIR OS NÚMEROS DE TELEFONE, MANTENDO A TELA ESTÁTICA CASO ELE SAIA PARA O WHAYSAPP 
-PARA COPIAR O NUMERO E VOLTAR PARA COLAR EM NOSSO SISTEMA, O SISTEMA DEVE VALIDAR O CELULAR (XX) 999999999
-
-
-## SIDEBAR
-
-- CORRIGIR COMPORTAMENTO DE OCULTAÇÃO DO SIDEBAR, DEVE SER CHAMADO APENAS QUANDO CLICADO NAS 3 LISTRAS NO TOPO
-
+- Tela principal única, sem sidebar.
+- Header com seletor de competência.
+- Cards Previsto, Recebido e Pendente.
+- Grupos como badges clicáveis com gerenciamento em drawer.
+- Pendências na tela principal.
+- Configurações ao final: InfiniteTag, ciclo por grupo e mensagem com lista automática somente leitura.
+- Footer com atalhos, usuário e logout.
+- Importação de participantes, edição, remoção e baixa manual.
+- Contato financeiro organizacional com responsável e dependentes.
+- Renovação automática por Vercel Cron e aviso de entrada no próximo ciclo.
+- Checkout InfinitePay com idempotência, replay protection, webhook validado, `payment_check` e recuperação de interrupções.
+- Identidade visual CobraDora e responsividade mobile.

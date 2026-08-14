@@ -1,22 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
-import { processInfinitePayWebhook, InvalidWebhookSignatureError } from "@/services/webhook-processing";
+import {
+  processInfinitePayWebhook,
+  InvalidWebhookSignatureError,
+  WebhookReplayMismatchError,
+  PaymentConfirmationError,
+} from "@/services/webhook-processing";
+
+const MAX_WEBHOOK_BYTES = 64 * 1024;
+
+function response(body: unknown, status: number) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
+}
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
+  if (new TextEncoder().encode(rawBody).byteLength > MAX_WEBHOOK_BYTES) {
+    return response({ success: false, message: "Payload muito grande" }, 413);
+  }
   const token = request.nextUrl.searchParams.get("token");
 
   try {
-    await processInfinitePayWebhook(rawBody, token);
-    return NextResponse.json({ ok: true }, { status: 200 });
-  } catch (err) {
-    if (err instanceof InvalidWebhookSignatureError) {
-      console.error("Webhook InfinitePay: assinatura/token inválido", err);
-      return NextResponse.json({ error: "invalid_signature" }, { status: 401 });
+    const result = await processInfinitePayWebhook(rawBody, token);
+    return response({ success: true, message: null, alreadyProcessed: result.alreadyProcessed }, 200);
+  } catch (error) {
+    if (error instanceof InvalidWebhookSignatureError) {
+      console.warn("Webhook InfinitePay rejeitado: token inválido");
+      return response({ success: false, message: "Webhook não autorizado" }, 401);
     }
-    // Erros de dominio (sessao nao encontrada, valor divergente, payload
-    // malformado) nao vazam detalhes internos na resposta — apenas logados
-    // no servidor para investigacao.
-    console.error("Webhook InfinitePay: falha ao processar", err);
-    return NextResponse.json({ error: "webhook_processing_failed" }, { status: 400 });
+    if (error instanceof WebhookReplayMismatchError) {
+      console.warn("Webhook InfinitePay rejeitado: replay divergente");
+      return response({ success: false, message: "Evento divergente" }, 400);
+    }
+    if (error instanceof PaymentConfirmationError) {
+      console.error("Webhook InfinitePay não confirmado", { code: error.code });
+      return response({ success: false, message: "Pagamento não confirmado" }, 400);
+    }
+
+    console.error("Webhook InfinitePay: falha de processamento", error);
+    return response({ success: false, message: "Falha de processamento" }, 400);
   }
 }

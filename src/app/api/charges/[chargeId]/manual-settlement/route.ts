@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireOrganization, UnauthorizedError } from "@/lib/auth-context";
+import { requireAdmin, ForbiddenError, UnauthorizedError } from "@/lib/auth-context";
 import { registerManualSettlement, manualSettlementInput } from "@/services/manual-settlement";
 import { z } from "zod";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ chargeId: string }> }) {
   try {
-    const session = await requireOrganization();
+    const session = await requireAdmin();
     const { chargeId } = await params;
     const input = manualSettlementInput.parse(await request.json());
 
@@ -14,6 +14,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    if (err instanceof ForbiddenError) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: "validation_error", issues: err.issues }, { status: 400 });

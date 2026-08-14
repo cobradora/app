@@ -1,53 +1,738 @@
+import { createHash } from "node:crypto";
 import { db } from "@/db";
-import { groups, participants, charges, checkoutSessions, checkoutItems, gatewayAccounts } from "@/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
-import { randomBytes, createHash } from "node:crypto";
+import {
+  groups,
+  financialContacts,
+  participants,
+  charges,
+  billingPeriods,
+  checkoutSessions,
+  checkoutItems,
+  gatewayAccounts,
+} from "@/db/schema";
+import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { getPaymentsAdapter } from "@/payments";
+import { InfinitePayCheckoutRequestError } from "@/payments/infinitepay-adapter";
+import { deriveCheckoutToken, hashCheckoutToken } from "@/payments/session-tokens";
 import { normalizePhoneBR } from "@/lib/phone";
 
 const SESSION_TTL_MS = 30 * 60 * 1000;
+const CREATION_IN_FLIGHT_MS = 20_000;
 
-function sha256Hex(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+export type PublicCheckoutErrorCode =
+  | "group_not_found"
+  | "contact_not_found"
+  | "gateway_not_configured"
+  | "charges_unavailable"
+  | "idempotency_conflict"
+  | "checkout_in_progress"
+  | "checkout_reconciliation_required"
+  | "checkout_already_completed"
+  | "checkout_temporarily_unavailable";
+
+export class PublicCheckoutError extends Error {
+  constructor(
+    readonly code: PublicCheckoutErrorCode,
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "PublicCheckoutError";
+  }
+}
+
+function normalizeAndValidatePhone(rawPhone: string): string {
+  try {
+    const normalized = normalizePhoneBR(rawPhone);
+    if (/^\+55[1-9][0-9]9[0-9]{8}$/.test(normalized)) return normalized;
+  } catch {
+    // A resposta pública abaixo é deliberadamente uniforme.
+  }
+  throw new PublicCheckoutError("contact_not_found", "Telefone inválido ou não encontrado", 404);
 }
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function stableChargeIds(chargeIds: string[]): string[] {
+  return [...new Set(chargeIds)].sort();
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: string }).code === "23505";
+}
+
+function requestFingerprint(groupId: string, financialContactId: string, chargeIds: string[]): string {
+  return createHash("sha256")
+    .update(JSON.stringify({ groupId, financialContactId, chargeIds: stableChargeIds(chargeIds) }))
+    .digest("hex");
+}
+
+function sameIds(left: string[], right: string[]): boolean {
+  const a = stableChargeIds(left);
+  const b = stableChargeIds(right);
+  return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+type Session = typeof checkoutSessions.$inferSelect;
+type SelectedCharge = {
+  id: string;
+  participantId: string;
+  financialContactId: string;
+  groupId: string;
+  totalAmount: number;
+  status: typeof charges.$inferSelect.status;
+};
+
+async function loadSessionItems(sessionId: string) {
+  return db.select().from(checkoutItems).where(eq(checkoutItems.checkoutSessionId, sessionId));
+}
+
+async function sessionMatchesRequest(
+  session: Session,
+  responsibleParticipantId: string,
+  financialContactId: string,
+  fingerprint: string,
+  chargeIds: string[],
+): Promise<boolean> {
+  if (
+    session.participantId !== responsibleParticipantId ||
+    session.financialContactId !== financialContactId ||
+    (session.requestFingerprint && session.requestFingerprint !== fingerprint)
+  ) {
+    return false;
+  }
+  const items = await loadSessionItems(session.id);
+  return sameIds(items.map((item) => item.chargeId), chargeIds);
+}
+
+function checkoutResult(session: Session, items: { amount: number }[], payerName: string, resumed: boolean) {
+  if (!session.checkoutUrl || session.expiresAt.getTime() <= Date.now()) {
+    throw new PublicCheckoutError("checkout_in_progress", "O checkout ainda está sendo preparado. Tente novamente.", 409);
+  }
+  return {
+    checkoutSessionId: session.id,
+    checkoutUrl: session.checkoutUrl,
+    totalChargesAmount: items.reduce((sum, item) => sum + item.amount, 0),
+    payerName,
+    resumed,
+  };
+}
+
+function requiresReconciliation(session: Session): boolean {
+  return (
+    session.externalCreationState === "in_flight" ||
+    session.externalCreationState === "ambiguous" ||
+    session.externalCreationState === "linked" ||
+    Boolean(session.checkoutUrl) ||
+    Boolean(session.gatewayCheckoutId)
+  );
+}
+
+function reconciliationRequired(): never {
+  throw new PublicCheckoutError(
+    "checkout_reconciliation_required",
+    "Esta tentativa precisa ser reconciliada antes de iniciar outro checkout.",
+    409,
+  );
+}
+
 /**
- * Cria um checkout InfinitePay para um conjunto de charges pendentes de um
- * participante de um grupo publico.
- *
- * RB-006: o valor cobrado e sempre recalculado no backend a partir de
- * charges.totalAmount das charges selecionadas — o cliente nunca informa
- * (nem tem como alterar) o valor final.
- * RB-009: idempotencia via checkoutSessions.idempotencyKey (unique) — uma
- * segunda chamada com a mesma key reaproveita a sessao ja criada em vez de
- * duplicar a cobranca.
- *
- * Reserva atomica: uma charge so pode ser selecionada para uma NOVA sessao
- * enquanto estiver "open". O claim (UPDATE ... WHERE status = 'open') e'
- * atomico no banco, entao duas requisicoes concorrentes (abas duplicadas,
- * retry com idempotencyKey diferente) nunca conseguem reservar a mesma
- * charge em duas sessoes de checkout simultaneas — a segunda falha com erro
- * em vez de gerar dois links de pagamento validos para a mesma cobranca.
+ * Aplica o TTL sob lock. Uma reserva que seguramente nunca saiu do banco
+ * (`not_started`) pode ser liberada. Um link conhecido também deixa de ser
+ * devolvido e a cobrança volta a ficar disponível, mas a sessão continua
+ * como bloqueio de reconciliação para impedir um segundo link sobre os mesmos
+ * itens. Já uma chamada ambígua nunca é liberada automaticamente: não sabemos
+ * se o provedor recebeu o POST.
  */
+async function expireSessionIfNeeded(candidate: Session, now = new Date()): Promise<Session> {
+  if (
+    candidate.expiresAt.getTime() > now.getTime() ||
+    candidate.status === "completed" ||
+    candidate.status === "canceled" ||
+    candidate.status === "expired"
+  ) {
+    return candidate;
+  }
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select id from checkout_sessions where id = ${candidate.id} for update`);
+    const [current] = await tx.select().from(checkoutSessions).where(eq(checkoutSessions.id, candidate.id));
+    if (
+      !current ||
+      current.expiresAt.getTime() > now.getTime() ||
+      current.status === "completed" ||
+      current.status === "canceled" ||
+      current.status === "expired"
+    ) {
+      return current ?? candidate;
+    }
+
+    const ambiguous =
+      current.externalCreationState === "in_flight" || current.externalCreationState === "ambiguous";
+    const [expired] = await tx
+      .update(checkoutSessions)
+      .set({
+        status: "expired",
+        externalCreationState: ambiguous ? "ambiguous" : current.externalCreationState,
+      })
+      .where(
+        and(
+          eq(checkoutSessions.id, current.id),
+          inArray(checkoutSessions.status, ["created", "pending"]),
+          lte(checkoutSessions.expiresAt, now),
+        ),
+      )
+      .returning();
+    if (!expired) return current;
+
+    if (!ambiguous) {
+      const items = await tx.select().from(checkoutItems).where(eq(checkoutItems.checkoutSessionId, current.id));
+      if (items.length > 0) {
+        await tx
+          .update(charges)
+          .set({ status: "open", updatedAt: now })
+          .where(and(inArray(charges.id, items.map((item) => item.chargeId)), eq(charges.status, "checkout_pending")));
+      }
+    }
+    return expired;
+  });
+}
+
+export async function expireStaleCheckoutSessions(
+  now = new Date(),
+  limit = 500,
+): Promise<{ expired: number; released: number; awaitingReconciliation: number }> {
+  const candidates = await db
+    .select()
+    .from(checkoutSessions)
+    .where(
+      and(
+        inArray(checkoutSessions.status, ["created", "pending"]),
+        lte(checkoutSessions.expiresAt, now),
+      ),
+    )
+    .orderBy(checkoutSessions.expiresAt)
+    .limit(limit);
+
+  let expired = 0;
+  let released = 0;
+  let awaitingReconciliation = 0;
+  for (const candidate of candidates) {
+    const wasAmbiguous =
+      candidate.externalCreationState === "in_flight" || candidate.externalCreationState === "ambiguous";
+    const result = await expireSessionIfNeeded(candidate, now);
+    if (result.status !== "expired") continue;
+    expired += 1;
+    if (wasAmbiguous) awaitingReconciliation += 1;
+    else released += 1;
+  }
+  return { expired, released, awaitingReconciliation };
+}
+
+async function markStaleInFlightAsAmbiguous(session: Session): Promise<Session> {
+  if (session.externalCreationState !== "in_flight") return session;
+  const startedAt = session.externalRequestStartedAt ?? session.createdAt;
+  if (Date.now() - startedAt.getTime() < CREATION_IN_FLIGHT_MS) return session;
+
+  const [updated] = await db
+    .update(checkoutSessions)
+    .set({ externalCreationState: "ambiguous" })
+    .where(
+      and(
+        eq(checkoutSessions.id, session.id),
+        eq(checkoutSessions.status, "created"),
+        eq(checkoutSessions.externalCreationState, "in_flight"),
+      ),
+    )
+    .returning();
+  return updated ?? session;
+}
+
+type ReusableSessionDecision =
+  | { kind: "return"; value: ReturnType<typeof checkoutResult> }
+  | { kind: "create"; session: Session }
+  | { kind: "ignore" };
+
+async function decideReusableSession(candidate: Session, payerName: string): Promise<ReusableSessionDecision> {
+  let current = await expireSessionIfNeeded(candidate);
+
+  if (current.status === "completed") {
+    throw new PublicCheckoutError("checkout_already_completed", "Este checkout já foi concluído", 409);
+  }
+  if (current.status === "expired") {
+    if (requiresReconciliation(current)) reconciliationRequired();
+    return { kind: "ignore" };
+  }
+  if (current.status === "canceled") return { kind: "ignore" };
+
+  if (current.checkoutUrl) {
+    if (current.status === "created" || current.externalCreationState !== "linked") {
+      const [linked] = await db
+        .update(checkoutSessions)
+        .set({ status: "pending", externalCreationState: "linked" })
+        .where(
+          and(
+            eq(checkoutSessions.id, current.id),
+            inArray(checkoutSessions.status, ["created", "pending"]),
+            gt(checkoutSessions.expiresAt, new Date()),
+          ),
+        )
+        .returning();
+      if (linked) current = linked;
+    }
+    return {
+      kind: "return",
+      value: checkoutResult(current, await loadSessionItems(current.id), payerName, true),
+    };
+  }
+
+  if (current.externalCreationState === "in_flight") {
+    current = await markStaleInFlightAsAmbiguous(current);
+    if (current.externalCreationState === "in_flight") {
+      throw new PublicCheckoutError("checkout_in_progress", "O checkout ainda está sendo preparado. Tente novamente.", 409);
+    }
+  }
+  if (
+    current.status === "pending" ||
+    current.externalCreationState === "ambiguous" ||
+    current.externalCreationState === "linked"
+  ) {
+    reconciliationRequired();
+  }
+  if (current.status === "created" && current.externalCreationState === "not_started") {
+    return { kind: "create", session: current };
+  }
+  return { kind: "ignore" };
+}
+
+async function findCompatibleRecoverableSession(
+  organizationId: string,
+  responsibleParticipantId: string,
+  financialContactId: string,
+  fingerprint: string,
+  chargeIds: string[],
+): Promise<Session | null> {
+  const candidates = await db
+    .select()
+    .from(checkoutSessions)
+    .where(
+      and(
+        eq(checkoutSessions.organizationId, organizationId),
+        eq(checkoutSessions.participantId, responsibleParticipantId),
+        eq(checkoutSessions.financialContactId, financialContactId),
+        eq(checkoutSessions.gateway, "infinitepay"),
+        inArray(checkoutSessions.status, ["created", "pending", "expired"]),
+      ),
+    )
+    .orderBy(desc(checkoutSessions.createdAt))
+    .limit(10);
+
+  for (const rawCandidate of candidates) {
+    const candidate = await expireSessionIfNeeded(rawCandidate);
+    if (
+      (await sessionMatchesRequest(candidate, responsibleParticipantId, financialContactId, fingerprint, chargeIds)) &&
+      (candidate.status !== "expired" || requiresReconciliation(candidate))
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/** Impede novo checkout parcial/superset quando qualquer item ainda pode
+ * pertencer a uma criação externa anterior. O fingerprint exato não basta:
+ * um novo pedido poderia selecionar apenas parte do checkout antigo. */
+async function findOverlappingBlockingSession(
+  organizationId: string,
+  chargeIds: string[],
+  excludeSessionId?: string,
+): Promise<Session | null> {
+  const candidates = await db
+    .select({ session: checkoutSessions })
+    .from(checkoutSessions)
+    .innerJoin(checkoutItems, eq(checkoutItems.checkoutSessionId, checkoutSessions.id))
+    .where(
+      and(
+        eq(checkoutSessions.organizationId, organizationId),
+        inArray(checkoutSessions.status, ["created", "pending", "expired"]),
+        inArray(checkoutItems.chargeId, chargeIds),
+      ),
+    )
+    .orderBy(desc(checkoutSessions.createdAt));
+
+  const seen = new Set<string>();
+  for (const row of candidates) {
+    if (row.session.id === excludeSessionId || seen.has(row.session.id)) continue;
+    seen.add(row.session.id);
+    const candidate = await expireSessionIfNeeded(row.session);
+    if (candidate.status === "created" || candidate.status === "pending") return candidate;
+    if (candidate.status === "expired" && requiresReconciliation(candidate)) return candidate;
+  }
+  return null;
+}
+
+async function cancelSessionAndReleaseCharges(sessionId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select id from checkout_sessions where id = ${sessionId} for update`);
+    const [session] = await tx.select().from(checkoutSessions).where(eq(checkoutSessions.id, sessionId));
+    if (
+      !session ||
+      session.status !== "created" ||
+      !["not_started", "in_flight"].includes(session.externalCreationState)
+    ) return;
+
+    const items = await tx.select().from(checkoutItems).where(eq(checkoutItems.checkoutSessionId, sessionId));
+    await tx
+      .update(checkoutSessions)
+      .set({ status: "canceled", externalCreationState: "not_started" })
+      .where(eq(checkoutSessions.id, sessionId));
+
+    if (items.length > 0) {
+      await tx
+        .update(charges)
+        .set({ status: "open", updatedAt: new Date() })
+        .where(and(inArray(charges.id, items.map((item) => item.chargeId)), eq(charges.status, "checkout_pending")));
+    }
+  });
+}
+
+async function reviveCanceledSession(
+  session: Session,
+  selectedCharges: SelectedCharge[],
+  gatewayAccount: { id: string; externalAccountId: string },
+): Promise<Session> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select id from checkout_sessions where id = ${session.id} for update`);
+    const [current] = await tx.select().from(checkoutSessions).where(eq(checkoutSessions.id, session.id));
+    if (
+      !current ||
+      current.status !== "canceled" ||
+      current.checkoutUrl ||
+      requiresReconciliation(current)
+    ) {
+      throw new PublicCheckoutError("idempotency_conflict", "Esta tentativa de checkout não pode ser reutilizada", 409);
+    }
+
+    const participantIds = [...new Set([session.participantId, ...selectedCharges.map((charge) => charge.participantId)])].sort();
+    await tx.execute(sql`select id from participants where id in ${participantIds} order by id for key share`);
+    const currentParticipants = await tx
+      .select({
+        id: participants.id,
+        financialContactId: participants.financialContactId,
+        financialRole: participants.financialRole,
+      })
+      .from(participants)
+      .where(inArray(participants.id, participantIds));
+    if (
+      currentParticipants.length !== participantIds.length ||
+      currentParticipants.some((participant) => participant.financialContactId !== session.financialContactId) ||
+      !currentParticipants.some(
+        (participant) => participant.id === session.participantId && participant.financialRole === "responsible",
+      )
+    ) {
+      throw new PublicCheckoutError("charges_unavailable", "O contato financeiro mudou durante o checkout", 409);
+    }
+
+    const claimed = await tx
+      .update(charges)
+      .set({ status: "checkout_pending", updatedAt: new Date() })
+      .where(and(inArray(charges.id, selectedCharges.map((charge) => charge.id)), eq(charges.status, "open")))
+      .returning();
+    if (claimed.length !== selectedCharges.length) {
+      throw new PublicCheckoutError("charges_unavailable", "Uma ou mais cobranças não estão disponíveis", 409);
+    }
+
+    await tx.delete(checkoutItems).where(eq(checkoutItems.checkoutSessionId, session.id));
+    await tx.insert(checkoutItems).values(
+      selectedCharges.map((charge) => ({
+        checkoutSessionId: session.id,
+        chargeId: charge.id,
+        amount: charge.totalAmount,
+      })),
+    );
+
+    const webhookTokenHash = hashCheckoutToken(deriveCheckoutToken(session.id, "webhook"));
+    const recoveryTokenHash = hashCheckoutToken(deriveCheckoutToken(session.id, "recovery"));
+    const [revived] = await tx
+      .update(checkoutSessions)
+      .set({
+        status: "created",
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+        gatewayCheckoutId: null,
+        gatewayPaymentId: null,
+        gatewayInvoiceSlug: null,
+        checkoutUrl: null,
+        gatewayAccountId: gatewayAccount.id,
+        gatewayExternalAccountIdSnapshot: gatewayAccount.externalAccountId,
+        externalCreationState: "not_started",
+        externalRequestStartedAt: null,
+        webhookTokenHash,
+        recoveryTokenHash,
+      })
+      .where(eq(checkoutSessions.id, session.id))
+      .returning();
+    return revived;
+  });
+}
+
+async function createReservedSession(input: {
+  organizationId: string;
+  responsibleParticipantId: string;
+  financialContactId: string;
+  idempotencyKey: string;
+  fingerprint: string;
+  selectedCharges: SelectedCharge[];
+  gatewayAccountId: string;
+  gatewayExternalAccountId: string;
+}): Promise<Session> {
+  return db.transaction(async (tx) => {
+    const participantIds = [...new Set([
+      input.responsibleParticipantId,
+      ...input.selectedCharges.map((charge) => charge.participantId),
+    ])].sort();
+    // Serializa a troca de contato com a reserva. updateParticipant usa FOR
+    // UPDATE; esta leitura compartilhada garante que nenhum dos lados grave
+    // uma sessão apontando para o contato antigo numa corrida concorrente.
+    await tx.execute(sql`select id from participants where id in ${participantIds} order by id for key share`);
+    const currentParticipants = await tx
+      .select({
+        id: participants.id,
+        financialContactId: participants.financialContactId,
+        financialRole: participants.financialRole,
+      })
+      .from(participants)
+      .where(inArray(participants.id, participantIds));
+    if (
+      currentParticipants.length !== participantIds.length ||
+      currentParticipants.some((participant) => participant.financialContactId !== input.financialContactId) ||
+      !currentParticipants.some(
+        (participant) =>
+          participant.id === input.responsibleParticipantId && participant.financialRole === "responsible",
+      )
+    ) {
+      throw new PublicCheckoutError("charges_unavailable", "O contato financeiro mudou durante o checkout", 409);
+    }
+
+    const [session] = await tx
+      .insert(checkoutSessions)
+      .values({
+        organizationId: input.organizationId,
+        participantId: input.responsibleParticipantId,
+        financialContactId: input.financialContactId,
+        gateway: "infinitepay",
+        status: "created",
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+        idempotencyKey: input.idempotencyKey,
+        requestFingerprint: input.fingerprint,
+        gatewayAccountId: input.gatewayAccountId,
+        gatewayExternalAccountIdSnapshot: input.gatewayExternalAccountId,
+        externalCreationState: "not_started",
+      })
+      .returning();
+
+    const webhookToken = deriveCheckoutToken(session.id, "webhook");
+    const recoveryToken = deriveCheckoutToken(session.id, "recovery");
+    await tx
+      .update(checkoutSessions)
+      .set({
+        webhookTokenHash: hashCheckoutToken(webhookToken),
+        recoveryTokenHash: hashCheckoutToken(recoveryToken),
+      })
+      .where(eq(checkoutSessions.id, session.id));
+
+    const claimed = await tx
+      .update(charges)
+      .set({ status: "checkout_pending", updatedAt: new Date() })
+      .where(and(inArray(charges.id, input.selectedCharges.map((charge) => charge.id)), eq(charges.status, "open")))
+      .returning();
+    if (claimed.length !== input.selectedCharges.length) {
+      throw new PublicCheckoutError("charges_unavailable", "Uma ou mais cobranças não estão disponíveis", 409);
+    }
+
+    await tx.insert(checkoutItems).values(
+      input.selectedCharges.map((charge) => ({
+        checkoutSessionId: session.id,
+        chargeId: charge.id,
+        amount: charge.totalAmount,
+      })),
+    );
+
+    return {
+      ...session,
+      webhookTokenHash: hashCheckoutToken(webhookToken),
+      recoveryTokenHash: hashCheckoutToken(recoveryToken),
+    };
+  });
+}
+
+/**
+ * Compare-and-set que concede a uma única requisição o direito de executar o
+ * POST externo. Também renova hashes determinísticos e snapshots antes de
+ * qualquer byte sair do processo, cobrindo sessões legadas/revividas.
+ */
+async function startExternalCreation(
+  session: Session,
+  gatewayAccount: { id: string; externalAccountId: string },
+): Promise<Session> {
+  const now = new Date();
+  const [started] = await db
+    .update(checkoutSessions)
+    .set({
+      gatewayAccountId: gatewayAccount.id,
+      gatewayExternalAccountIdSnapshot: gatewayAccount.externalAccountId,
+      webhookTokenHash: hashCheckoutToken(deriveCheckoutToken(session.id, "webhook")),
+      recoveryTokenHash: hashCheckoutToken(deriveCheckoutToken(session.id, "recovery")),
+      externalCreationState: "in_flight",
+      externalRequestStartedAt: now,
+    })
+    .where(
+      and(
+        eq(checkoutSessions.id, session.id),
+        eq(checkoutSessions.status, "created"),
+        eq(checkoutSessions.externalCreationState, "not_started"),
+        gt(checkoutSessions.expiresAt, now),
+      ),
+    )
+    .returning();
+
+  if (started) return started;
+
+  const [current] = await db.select().from(checkoutSessions).where(eq(checkoutSessions.id, session.id));
+  if (current) {
+    const refreshed = await expireSessionIfNeeded(current, now);
+    if (refreshed.externalCreationState === "in_flight") {
+      throw new PublicCheckoutError("checkout_in_progress", "O checkout ainda está sendo preparado. Tente novamente.", 409);
+    }
+    if (requiresReconciliation(refreshed)) reconciliationRequired();
+  }
+  throw new PublicCheckoutError("idempotency_conflict", "Esta tentativa de checkout não pode ser reutilizada", 409);
+}
+
+async function markExternalCreationAmbiguous(sessionId: string): Promise<void> {
+  await db
+    .update(checkoutSessions)
+    .set({ externalCreationState: "ambiguous" })
+    .where(
+      and(
+        eq(checkoutSessions.id, sessionId),
+        eq(checkoutSessions.status, "created"),
+        eq(checkoutSessions.externalCreationState, "in_flight"),
+      ),
+    );
+}
+
+async function createExternalCheckout(input: {
+  session: Session;
+  organizationId: string;
+  responsibleParticipantId: string;
+  responsibleName: string;
+  phoneNormalized: string;
+  gatewayAccount: { id: string; externalAccountId: string };
+  totalAmount: number;
+  idempotencyKey: string;
+}) {
+  const startedSession = await startExternalCreation(input.session, input.gatewayAccount);
+  const webhookToken = deriveCheckoutToken(input.session.id, "webhook");
+  const recoveryToken = deriveCheckoutToken(input.session.id, "recovery");
+
+  try {
+    const result = await getPaymentsAdapter("infinitepay").createCheckout({
+      organizationId: input.organizationId,
+      participantId: input.responsibleParticipantId,
+      amount: input.totalAmount,
+      splits: [],
+      dueDate: today(),
+      idempotencyKey: input.idempotencyKey,
+      gatewayExternalAccountId: startedSession.gatewayExternalAccountIdSnapshot ?? input.gatewayAccount.externalAccountId,
+      externalReference: input.session.id,
+      webhookToken,
+      recoveryToken,
+      buyerName: input.responsibleName,
+      buyerPhone: input.phoneNormalized,
+    });
+
+    const [linked] = await db
+      .update(checkoutSessions)
+      .set({
+        gatewayCheckoutId: result.gatewayCheckoutId,
+        checkoutUrl: result.checkoutUrl,
+        status: "pending",
+        externalCreationState: "linked",
+      })
+      .where(
+        and(
+          eq(checkoutSessions.id, input.session.id),
+          eq(checkoutSessions.status, "created"),
+          eq(checkoutSessions.externalCreationState, "in_flight"),
+        ),
+      )
+      .returning();
+    if (!linked) {
+      throw new InfinitePayCheckoutRequestError(
+        "A criação externa foi concluída, mas o vínculo local não pôde ser confirmado",
+        true,
+      );
+    }
+
+    return result.checkoutUrl;
+  } catch (error) {
+    if (error instanceof InfinitePayCheckoutRequestError && !error.mayHaveSucceeded) {
+      await cancelSessionAndReleaseCharges(input.session.id);
+    } else {
+      await markExternalCreationAmbiguous(input.session.id);
+    }
+    throw new PublicCheckoutError(
+      "checkout_temporarily_unavailable",
+      "Não foi possível preparar o checkout agora. Tente novamente em alguns instantes.",
+      503,
+    );
+  }
+}
+
 export async function createCheckoutForCharges(
   groupPublicSlug: string,
   rawPhone: string,
   chargeIds: string[],
   idempotencyKey: string,
 ) {
-  const [group] = await db.select().from(groups).where(eq(groups.publicSlug, groupPublicSlug));
-  if (!group) throw new Error("Grupo não encontrado");
+  const uniqueChargeIds = stableChargeIds(chargeIds);
+  if (uniqueChargeIds.length === 0 || uniqueChargeIds.length !== chargeIds.length) {
+    throw new PublicCheckoutError("charges_unavailable", "A seleção de cobranças é inválida", 400);
+  }
 
-  const phoneNormalized = normalizePhoneBR(rawPhone);
-  const [participant] = await db
+  const [group] = await db
+    .select()
+    .from(groups)
+    .where(and(eq(groups.publicSlug, groupPublicSlug), eq(groups.status, "active")));
+  if (!group) throw new PublicCheckoutError("group_not_found", "Grupo não encontrado", 404);
+
+  const phoneNormalized = normalizeAndValidatePhone(rawPhone);
+  const [financialContact] = await db
+    .select()
+    .from(financialContacts)
+    .where(
+      and(
+        eq(financialContacts.organizationId, group.organizationId),
+        eq(financialContacts.phoneNormalized, phoneNormalized),
+      ),
+    );
+  if (!financialContact) {
+    throw new PublicCheckoutError("contact_not_found", "Telefone inválido ou não encontrado", 404);
+  }
+
+  const [responsible] = await db
     .select()
     .from(participants)
-    .where(and(eq(participants.organizationId, group.organizationId), eq(participants.phoneNormalized, phoneNormalized)));
-  if (!participant) throw new Error("Participante não encontrado");
+    .where(
+      and(
+        eq(participants.organizationId, group.organizationId),
+        eq(participants.financialContactId, financialContact.id),
+        eq(participants.financialRole, "responsible"),
+      ),
+    );
+  if (!responsible) throw new PublicCheckoutError("contact_not_found", "Telefone inválido ou não encontrado", 404);
 
   const [gatewayAccount] = await db
     .select()
@@ -59,124 +744,154 @@ export async function createCheckoutForCharges(
         eq(gatewayAccounts.status, "active"),
       ),
     );
-  if (!gatewayAccount) throw new Error("Conta InfinitePay não configurada para esta organização");
+  if (!gatewayAccount) {
+    throw new PublicCheckoutError("gateway_not_configured", "Pagamento online indisponível para esta organização", 409);
+  }
 
-  // RB-009: se ja existe uma sessao para essa idempotencyKey, reaproveita-a
-  // em vez de criar (e cobrar) duas vezes para o mesmo retry do cliente.
-  const [existingSession] = await db
+  const selectedCharges = await db
+    .select({
+      id: charges.id,
+      participantId: charges.participantId,
+      financialContactId: participants.financialContactId,
+      groupId: billingPeriods.groupId,
+      totalAmount: charges.totalAmount,
+      status: charges.status,
+    })
+    .from(charges)
+    .innerJoin(participants, eq(charges.participantId, participants.id))
+    .innerJoin(billingPeriods, eq(charges.billingPeriodId, billingPeriods.id))
+    .where(inArray(charges.id, uniqueChargeIds));
+
+  const selectionIsValid =
+    selectedCharges.length === uniqueChargeIds.length &&
+    selectedCharges.every(
+      (charge) =>
+        charge.groupId === group.id &&
+        charge.financialContactId === financialContact.id &&
+        (charge.status === "open" || charge.status === "checkout_pending") &&
+        Number.isInteger(charge.totalAmount) &&
+        charge.totalAmount > 0,
+    );
+  if (!selectionIsValid) {
+    throw new PublicCheckoutError("charges_unavailable", "Uma ou mais cobranças não estão disponíveis", 409);
+  }
+
+  const fingerprint = requestFingerprint(group.id, financialContact.id, uniqueChargeIds);
+  const [sameKeySession] = await db
     .select()
     .from(checkoutSessions)
-    .where(eq(checkoutSessions.idempotencyKey, idempotencyKey));
-
-  if (existingSession) {
-    const existingItems = await db
-      .select()
-      .from(checkoutItems)
-      .where(eq(checkoutItems.checkoutSessionId, existingSession.id));
-    const totalChargesAmount = existingItems.reduce((sum, item) => sum + item.amount, 0);
-
-    // checkoutUrl fica persistida na sessao — reaproveitamos o link ja
-    // gerado em vez de rechamar a InfinitePay, que nao garante que um
-    // order_nsu repetido devolva a mesma URL (idempotencia real, sem
-    // depender do comportamento da API deles).
-    if (!existingSession.checkoutUrl) {
-      throw new Error("Sessão de checkout existente sem checkoutUrl — estado inconsistente");
-    }
-
-    return { checkoutSessionId: existingSession.id, checkoutUrl: existingSession.checkoutUrl, totalChargesAmount };
-  }
-
-  const webhookToken = randomBytes(32).toString("base64url");
-  const webhookTokenHash = sha256Hex(webhookToken);
-  const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
-
-  // A sessao e salva no banco ANTES de chamar a InfinitePay (mesmo padrao do
-  // portal-de-torcida em create-order.mjs), para que o id gerado pelo banco
-  // sirva de order_nsu determinístico. O claim das charges e a criacao da
-  // sessao/itens acontecem na mesma transacao — se o claim nao pegar todas
-  // as charges pedidas (porque outra sessao concorrente ja reservou alguma),
-  // a transacao inteira e desfeita.
-  const { session, claimedCharges, totalChargesAmount } = await db.transaction(async (tx) => {
-    const claimedCharges = await tx
-      .update(charges)
-      .set({ status: "checkout_pending" })
-      .where(
-        and(
-          inArray(charges.id, chargeIds),
-          eq(charges.participantId, participant.id),
-          eq(charges.status, "open"),
-        ),
-      )
-      .returning();
-
-    if (claimedCharges.length === 0 || claimedCharges.length !== chargeIds.length) {
-      throw new Error(
-        "Uma ou mais cobranças não estão mais disponíveis para pagamento (já pagas ou com um checkout em andamento)",
-      );
-    }
-
-    // RB-006: soma recalculada no backend, nunca aceita do cliente.
-    const totalChargesAmount = claimedCharges.reduce((sum, charge) => sum + charge.totalAmount, 0);
-
-    const [session] = await tx
-      .insert(checkoutSessions)
-      .values({
-        organizationId: group.organizationId,
-        participantId: participant.id,
-        gateway: "infinitepay",
-        status: "created",
-        expiresAt,
-        idempotencyKey,
-        webhookTokenHash,
-      })
-      .returning();
-
-    await tx.insert(checkoutItems).values(
-      claimedCharges.map((charge) => ({
-        checkoutSessionId: session.id,
-        chargeId: charge.id,
-        amount: charge.totalAmount,
-      })),
+    .where(
+      and(
+        eq(checkoutSessions.organizationId, group.organizationId),
+        eq(checkoutSessions.idempotencyKey, idempotencyKey),
+      ),
     );
 
-    return { session, claimedCharges, totalChargesAmount };
+  let session: Session | null = null;
+  let resumed = false;
+
+  if (sameKeySession) {
+    if (!(await sessionMatchesRequest(sameKeySession, responsible.id, financialContact.id, fingerprint, uniqueChargeIds))) {
+      throw new PublicCheckoutError(
+        "idempotency_conflict",
+        "A chave de idempotência já foi usada para outra seleção",
+        409,
+      );
+    }
+    const currentSameKeySession = await expireSessionIfNeeded(sameKeySession);
+    if (currentSameKeySession.status === "canceled") {
+      if (!selectedCharges.every((charge) => charge.status === "open")) {
+        throw new PublicCheckoutError("charges_unavailable", "Uma ou mais cobranças não estão disponíveis", 409);
+      }
+      session = await reviveCanceledSession(currentSameKeySession, selectedCharges, gatewayAccount);
+      resumed = true;
+    } else {
+      const decision = await decideReusableSession(currentSameKeySession, responsible.name);
+      if (decision.kind === "return") return decision.value;
+      if (decision.kind === "create") {
+        session = decision.session;
+        resumed = true;
+      } else {
+        throw new PublicCheckoutError("idempotency_conflict", "Esta tentativa de checkout expirou", 409);
+      }
+    }
+  }
+
+  if (!session) {
+    const compatible = await findCompatibleRecoverableSession(
+      group.organizationId,
+      responsible.id,
+      financialContact.id,
+      fingerprint,
+      uniqueChargeIds,
+    );
+    if (compatible) {
+      const decision = await decideReusableSession(compatible, responsible.name);
+      if (decision.kind === "return") return decision.value;
+      if (decision.kind === "create") {
+        session = decision.session;
+        resumed = true;
+      }
+    }
+  }
+
+  if (!session) {
+    const overlapping = await findOverlappingBlockingSession(group.organizationId, uniqueChargeIds);
+    if (overlapping) {
+      if (requiresReconciliation(overlapping) || overlapping.status === "expired") reconciliationRequired();
+      throw new PublicCheckoutError(
+        "checkout_in_progress",
+        "Uma ou mais cobranças já pertencem a outro checkout em preparação.",
+        409,
+      );
+    }
+  }
+
+  if (!session) {
+    if (!selectedCharges.every((charge) => charge.status === "open")) {
+      throw new PublicCheckoutError(
+        "charges_unavailable",
+        "Estas cobranças já pertencem a outro checkout. Selecione exatamente as cobranças reservadas para retomá-lo.",
+        409,
+      );
+    }
+    try {
+      session = await createReservedSession({
+        organizationId: group.organizationId,
+        responsibleParticipantId: responsible.id,
+        financialContactId: financialContact.id,
+        idempotencyKey,
+        fingerprint,
+        selectedCharges,
+        gatewayAccountId: gatewayAccount.id,
+        gatewayExternalAccountId: gatewayAccount.externalAccountId,
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new PublicCheckoutError("checkout_in_progress", "O checkout ainda está sendo preparado. Tente novamente.", 409);
+      }
+      throw error;
+    }
+  }
+
+  const items = await loadSessionItems(session.id);
+  const totalChargesAmount = items.reduce((sum, item) => sum + item.amount, 0);
+  const checkoutUrl = await createExternalCheckout({
+    session,
+    organizationId: group.organizationId,
+    responsibleParticipantId: responsible.id,
+    responsibleName: responsible.name,
+    phoneNormalized: financialContact.phoneNormalized,
+    gatewayAccount,
+    totalAmount: totalChargesAmount,
+    idempotencyKey: session.idempotencyKey,
   });
 
-  try {
-    const { checkoutUrl, gatewayCheckoutId } = await getPaymentsAdapter().createCheckout({
-      organizationId: group.organizationId,
-      participantId: participant.id,
-      amount: totalChargesAmount,
-      splits: [],
-      dueDate: today(),
-      idempotencyKey,
-      gatewayExternalAccountId: gatewayAccount.externalAccountId,
-      externalReference: session.id,
-      webhookToken,
-      buyerName: participant.name,
-      buyerPhone: participant.phoneNormalized,
-    });
-
-    await db
-      .update(checkoutSessions)
-      .set({ gatewayCheckoutId, checkoutUrl })
-      .where(eq(checkoutSessions.id, session.id));
-
-    return { checkoutSessionId: session.id, checkoutUrl, totalChargesAmount };
-  } catch (error) {
-    // A criacao do link externo falhou: libera a reserva das charges (volta
-    // para "open") em vez de deixa-las presas em "checkout_pending" para
-    // sempre, e marca a sessao como cancelada.
-    await db
-      .update(charges)
-      .set({ status: "open" })
-      .where(
-        inArray(
-          charges.id,
-          claimedCharges.map((c) => c.id),
-        ),
-      );
-    await db.update(checkoutSessions).set({ status: "canceled" }).where(eq(checkoutSessions.id, session.id));
-    throw error;
-  }
+  return {
+    checkoutSessionId: session.id,
+    checkoutUrl,
+    totalChargesAmount,
+    payerName: responsible.name,
+    resumed,
+  };
 }

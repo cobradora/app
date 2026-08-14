@@ -25,9 +25,9 @@ describe("charges service", () => {
   it("lista cobrancas de todos os periodos do grupo, com nome do participante", async () => {
     const participant = await findOrCreateParticipantByPhone(organizationId, "(11) 98812-4410");
     await db.update(participants).set({ name: "Marina Costa" }).where(eq(participants.id, participant.id));
-    await linkParticipantToGroup(groupId, participant.id);
-    await generateBillingPeriod(groupId, "2026-07");
-    await generateBillingPeriod(groupId, "2026-08");
+    await linkParticipantToGroup(organizationId, groupId, participant.id, new Date("2026-07-01T12:00:00Z"));
+    await generateBillingPeriod(organizationId, groupId, "2026-07");
+    await generateBillingPeriod(organizationId, groupId, "2026-08");
 
     const rows = await listGroupCharges(organizationId, groupId);
 
@@ -58,13 +58,13 @@ describe("charges service", () => {
       .returning();
 
     const participant1 = await findOrCreateParticipantByPhone(organizationId, "(11) 98812-4410");
-    await linkParticipantToGroup(groupId, participant1.id);
+    await linkParticipantToGroup(organizationId, groupId, participant1.id, new Date("2026-07-01T12:00:00Z"));
     const participant2 = await findOrCreateParticipantByPhone(organizationId, "(11) 90000-0002");
-    await linkParticipantToGroup(otherGroup.id, participant2.id);
+    await linkParticipantToGroup(organizationId, otherGroup.id, participant2.id, new Date("2026-07-01T12:00:00Z"));
 
-    await generateBillingPeriod(groupId, "2026-08");
-    await generateBillingPeriod(otherGroup.id, "2026-08");
-    await generateBillingPeriod(groupId, "2026-07");
+    await generateBillingPeriod(organizationId, groupId, "2026-08");
+    await generateBillingPeriod(organizationId, otherGroup.id, "2026-08");
+    await generateBillingPeriod(organizationId, groupId, "2026-07");
 
     const rows = await listOrganizationCharges(organizationId, "2026-08");
 
@@ -81,8 +81,8 @@ describe("charges service", () => {
       .values({ organizationId: otherOrg.id, name: "Grupo de outra org", publicSlug: "outra-org-abcd", billingDay: 5, defaultAmount: 5000 })
       .returning();
     const otherParticipant = await findOrCreateParticipantByPhone(otherOrg.id, "(11) 90000-0003");
-    await linkParticipantToGroup(otherGroup.id, otherParticipant.id);
-    await generateBillingPeriod(otherGroup.id, "2026-08");
+    await linkParticipantToGroup(otherOrg.id, otherGroup.id, otherParticipant.id, new Date("2026-08-01T12:00:00Z"));
+    await generateBillingPeriod(otherOrg.id, otherGroup.id, "2026-08");
 
     const rows = await listOrganizationCharges(organizationId, "2026-08");
 

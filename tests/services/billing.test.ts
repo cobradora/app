@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { db } from "@/db";
 import { organizations, groups, charges } from "@/db/schema";
 import { findOrCreateParticipantByPhone, linkParticipantToGroup } from "@/services/participants";
-import { generateBillingPeriod } from "@/services/billing";
+import { generateBillingPeriod, generateDueBillingPeriods } from "@/services/billing";
 import { truncateAll } from "../helpers/db";
 import { eq } from "drizzle-orm";
 
@@ -23,9 +23,9 @@ describe("billing service", () => {
 
   it("gera uma charge por participante ativo do grupo", async () => {
     const participant = await findOrCreateParticipantByPhone(organizationId, "(11) 98812-4410");
-    await linkParticipantToGroup(groupId, participant.id);
+    await linkParticipantToGroup(organizationId, groupId, participant.id, new Date("2026-08-09T12:00:00Z"));
 
-    const period = await generateBillingPeriod(groupId, "2026-08");
+    const period = await generateBillingPeriod(organizationId, groupId, "2026-08");
 
     const rows = await db.select().from(charges).where(eq(charges.billingPeriodId, period.id));
     expect(rows).toHaveLength(1);
@@ -35,14 +35,48 @@ describe("billing service", () => {
   });
 
   it("bloqueia gerar cobrança duas vezes para o mesmo mês, com mensagem clara", async () => {
-    await generateBillingPeriod(groupId, "2026-08");
+    await generateBillingPeriod(organizationId, groupId, "2026-08");
 
-    await expect(generateBillingPeriod(groupId, "2026-08")).rejects.toThrow("Já existe uma cobrança gerada para este mês");
+    const repeated = await generateBillingPeriod(organizationId, groupId, "2026-08");
+    expect(repeated.referenceMonth).toBe("2026-08");
   });
 
   it("permite gerar cobrança para meses diferentes do mesmo grupo", async () => {
-    await generateBillingPeriod(groupId, "2026-08");
-    const second = await generateBillingPeriod(groupId, "2026-09");
+    await generateBillingPeriod(organizationId, groupId, "2026-08");
+    const second = await generateBillingPeriod(organizationId, groupId, "2026-09");
     expect(second.referenceMonth).toBe("2026-09");
+  });
+
+  it("isola a falha de um grupo no Cron e continua os demais sem expor a mensagem", async () => {
+    const [secondGroup] = await db
+      .insert(groups)
+      .values({
+        organizationId,
+        name: "Basquete",
+        publicSlug: "basquete-abcd",
+        billingDay: 10,
+        defaultAmount: 9000,
+      })
+      .returning();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    try {
+      const result = await generateDueBillingPeriods(
+        new Date("2026-08-10T12:00:00-03:00"),
+        async (_organizationId, targetGroupId) => {
+          if (targetGroupId === groupId) throw new Error("segredo-que-nao-pode-vazar");
+        },
+      );
+
+      expect(result.generated).toEqual([
+        { groupId: secondGroup.id, referenceMonth: "2026-08" },
+      ]);
+      expect(result.failures).toEqual([
+        { groupId, referenceMonth: "2026-08", code: "generation_failed" },
+      ]);
+      expect(JSON.stringify(consoleError.mock.calls)).not.toContain("segredo-que-nao-pode-vazar");
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

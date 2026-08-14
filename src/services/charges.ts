@@ -28,7 +28,12 @@ export async function listGroupCharges(organizationId: string, groupId: string) 
     .from(charges)
     .innerJoin(billingPeriods, eq(charges.billingPeriodId, billingPeriods.id))
     .innerJoin(participants, eq(charges.participantId, participants.id))
-    .where(eq(billingPeriods.groupId, groupId));
+    .where(
+      and(
+        eq(billingPeriods.groupId, groupId),
+        eq(participants.organizationId, organizationId),
+      ),
+    );
 }
 
 /**
@@ -53,5 +58,11 @@ export async function listOrganizationCharges(organizationId: string, referenceM
     .innerJoin(billingPeriods, eq(charges.billingPeriodId, billingPeriods.id))
     .innerJoin(groups, eq(billingPeriods.groupId, groups.id))
     .innerJoin(participants, eq(charges.participantId, participants.id))
-    .where(and(eq(groups.organizationId, organizationId), eq(billingPeriods.referenceMonth, referenceMonth)));
+    .where(
+      and(
+        eq(groups.organizationId, organizationId),
+        eq(participants.organizationId, organizationId),
+        eq(billingPeriods.referenceMonth, referenceMonth),
+      ),
+    );
 }

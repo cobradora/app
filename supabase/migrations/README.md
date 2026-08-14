@@ -8,7 +8,8 @@ Como o `drizzle-kit migrate` não conseguiu se conectar diretamente a este proje
 2. `0001_milky_whizzer.sql` — adiciona `checkout_sessions.webhook_token_hash`.
 3. `0002_tidy_aqueduct.sql` — adiciona `checkout_sessions.checkout_url`.
 4. `0003_sloppy_daimon_hellstrom.sql` — adiciona `users.password_hash`.
+5. `0004_lowly_clea.sql` — reestrutura contatos financeiros, ciclos, configurações e segurança de checkout com backfill validado.
 
-Depois de rodar os 4, confira no **Table Editor** que as 15 tabelas apareceram (`organizations`, `users`, `groups`, `participants`, `group_participants`, `billing_periods`, `charges`, `checkout_sessions`, `checkout_items`, `payments`, `payment_allocations`, `gateway_accounts`, `commissions`, `webhook_events`, `audit_events`).
+Depois de rodar as migrations, confira também `financial_contacts` e `organization_settings`. A `0004` interrompe de propósito se encontrar telefone legado inválido, nome normalizado duplicado no mesmo grupo, gateway duplicado ou dupla alocação; corrija os dados reportados antes de tentar novamente.
 
 Se no futuro a conexão direta ao Supabase passar a funcionar por aqui, o fluxo normal (`npx dotenv -e .env.production -- drizzle-kit migrate`) volta a valer — essas cópias manuais existem só como contorno.

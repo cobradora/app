@@ -8,222 +8,398 @@ import {
   paymentAllocations,
   charges,
   auditEvents,
+  gatewayAccounts,
 } from "@/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { getPaymentsAdapter } from "@/payments";
+import { matchesCheckoutToken } from "@/payments/session-tokens";
+import { z } from "zod";
 
-/**
- * Lancada quando `adapter.validateWebhook` rejeita o par (rawBody, token) —
- * ou porque o token nao bate com o webhookTokenHash da sessao, ou porque a
- * sessao referenciada pelo order_nsu do payload nem existe (o adapter real
- * faz o lookup e retorna false nos dois casos, ja que o segredo e por
- * sessao).
- */
 export class InvalidWebhookSignatureError extends Error {
-  constructor(message = "Assinatura/token do webhook InfinitePay inválido") {
+  constructor(message = "Token do webhook InfinitePay inválido") {
     super(message);
     this.name = "InvalidWebhookSignatureError";
   }
 }
 
+export class WebhookReplayMismatchError extends Error {
+  constructor(message = "Replay de webhook com conteúdo divergente") {
+    super(message);
+    this.name = "WebhookReplayMismatchError";
+  }
+}
+
+export class InvalidRecoveryTokenError extends Error {
+  constructor(message = "Token de recuperação inválido") {
+    super(message);
+    this.name = "InvalidRecoveryTokenError";
+  }
+}
+
+export class PaymentConfirmationError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "PaymentConfirmationError";
+  }
+}
+
+const webhookPayloadSchema = z
+  .object({
+    order_nsu: z.string().uuid(),
+    transaction_nsu: z.union([z.string().min(1).max(200), z.number().finite()]).transform(String),
+    invoice_slug: z.string().min(1).max(200).optional(),
+    amount: z.union([z.number(), z.string()]).transform((value, context) => {
+      const amount = typeof value === "number" ? value : Number(value);
+      if (!Number.isSafeInteger(amount) || amount <= 0) {
+        context.addIssue({ code: "custom", message: "amount inválido" });
+        return z.NEVER;
+      }
+      return amount;
+    }),
+    capture_method: z.string().min(1).max(40).optional(),
+  })
+  .passthrough();
+
 function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === "object" && err !== null && (err as { code?: string }).code === "23505";
-}
+type ConfirmationSource = "webhook" | "payment_check";
 
-type InfinitePayRawPayload = {
-  order_nsu?: unknown;
-  transaction_nsu?: unknown;
-  amount?: unknown;
-  capture_method?: unknown;
+type ConfirmPaymentInput = {
+  sessionId: string;
+  gatewayPaymentId: string;
+  gatewayInvoiceSlug: string | null;
+  amount: number;
+  paymentMethod: string | null;
+  source: ConfirmationSource;
+  webhookEventId?: string;
 };
 
 /**
- * Processa um webhook de confirmacao de pagamento da InfinitePay.
- *
- * Modelo de confianca (mesmo do portal-de-torcida, decisao ja confirmada
- * para esta fase): so confiamos no conteudo financeiro do payload DEPOIS de
- * validar (a) o segredo por sessao via adapter.validateWebhook() e (b) o
- * valor batendo exatamente com a soma dos checkoutItems da sessao. Nao ha
- * fallback via adapter.getPayment()/payment_check nesta fase.
- *
- * Idempotencia em duas camadas:
- * 1. webhook_events (provider, external_event_id) unique — uma segunda
- *    entrega do mesmo transaction_nsu retorna { alreadyProcessed: true }
- *    sem reprocessar nada.
- * 2. payments.gateway_payment_id unique — rede de seguranca para corridas
- *    entre duas requisicoes concorrentes que passaram da checagem acima ao
- *    mesmo tempo.
+ * Único ponto que pode transformar cobranças reservadas em pagas. Webhook e
+ * payment_check convergem aqui, sob lock da sessão e na mesma transação que
+ * cria payment/alocações, conclui a sessão e finaliza o evento de webhook.
  */
-export async function processInfinitePayWebhook(
-  rawBody: string,
-  token: string | null,
-): Promise<{ alreadyProcessed: boolean }> {
-  let rawPayload: InfinitePayRawPayload;
-  try {
-    rawPayload = JSON.parse(rawBody);
-  } catch {
-    throw new Error("Payload do webhook InfinitePay inválido (JSON malformado)");
-  }
-
-  // Extraidos so para saber ONDE procurar (idempotencia / sessao) — nenhuma
-  // decisao financeira e tomada com base neles antes da validacao abaixo.
-  const orderNsu = typeof rawPayload.order_nsu === "string" ? rawPayload.order_nsu : null;
-  const transactionNsu = rawPayload.transaction_nsu != null ? String(rawPayload.transaction_nsu) : null;
-
-  if (!transactionNsu) {
-    throw new Error("Webhook InfinitePay sem transaction_nsu");
-  }
-
-  const payloadHash = sha256Hex(rawBody);
-
-  const [existingEvent] = await db
-    .select()
-    .from(webhookEvents)
-    .where(and(eq(webhookEvents.provider, "infinitepay"), eq(webhookEvents.externalEventId, transactionNsu)));
-
-  if (existingEvent) {
-    return { alreadyProcessed: true };
-  }
-
-  let webhookEvent: typeof webhookEvents.$inferSelect;
-  try {
-    [webhookEvent] = await db
-      .insert(webhookEvents)
-      .values({
-        provider: "infinitepay",
-        externalEventId: transactionNsu,
-        eventType: "payment.confirmed",
-        payloadHash,
-        processingStatus: "processing",
-      })
-      .returning();
-  } catch (err) {
-    // Corrida: outra requisicao inseriu o mesmo (provider, externalEventId)
-    // entre o SELECT acima e este INSERT.
-    if (isUniqueViolation(err)) {
-      return { alreadyProcessed: true };
+export async function confirmInfinitePayPayment(
+  input: ConfirmPaymentInput,
+): Promise<{ alreadyProcessed: boolean; paymentId: string }> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select id from checkout_sessions where id = ${input.sessionId} for update`);
+    const [session] = await tx.select().from(checkoutSessions).where(eq(checkoutSessions.id, input.sessionId));
+    if (!session || session.gateway !== "infinitepay") {
+      throw new PaymentConfirmationError("session_not_found", "Sessão de checkout não encontrada");
     }
-    throw err;
-  }
 
-  const adapter = getPaymentsAdapter();
+    if (session.gatewayPaymentId && session.gatewayPaymentId !== input.gatewayPaymentId) {
+      throw new PaymentConfirmationError("payment_mismatch", "A sessão já está vinculada a outra transação");
+    }
+    if (session.gatewayInvoiceSlug && input.gatewayInvoiceSlug && session.gatewayInvoiceSlug !== input.gatewayInvoiceSlug) {
+      throw new PaymentConfirmationError("invoice_mismatch", "A sessão já está vinculada a outra fatura");
+    }
 
-  const isValid = await adapter.validateWebhook(rawBody, token);
-  if (!isValid) {
-    await db
-      .update(webhookEvents)
-      .set({ processingStatus: "failed", errorMessage: "Token/assinatura do webhook inválido" })
-      .where(eq(webhookEvents.id, webhookEvent.id));
-    throw new InvalidWebhookSignatureError();
-  }
-
-  const parsed = adapter.parseWebhook(rawBody);
-
-  if (!orderNsu) {
-    await db
-      .update(webhookEvents)
-      .set({ processingStatus: "failed", errorMessage: "order_nsu ausente no payload do webhook" })
-      .where(eq(webhookEvents.id, webhookEvent.id));
-    throw new Error("Webhook InfinitePay sem order_nsu");
-  }
-
-  const [session] = await db.select().from(checkoutSessions).where(eq(checkoutSessions.id, orderNsu));
-  if (!session) {
-    await db
-      .update(webhookEvents)
-      .set({ processingStatus: "failed", errorMessage: "Sessão de checkout não encontrada para order_nsu" })
-      .where(eq(webhookEvents.id, webhookEvent.id));
-    throw new Error("Sessão de checkout não encontrada para order_nsu");
-  }
-
-  const items = await db.select().from(checkoutItems).where(eq(checkoutItems.checkoutSessionId, session.id));
-  const expectedAmount = items.reduce((sum, item) => sum + item.amount, 0);
-
-  const receivedAmount =
-    typeof rawPayload.amount === "number" ? rawPayload.amount : Number(rawPayload.amount);
-
-  if (!Number.isFinite(receivedAmount) || receivedAmount !== expectedAmount) {
-    await db
-      .update(webhookEvents)
-      .set({ processingStatus: "failed", errorMessage: "Valor do webhook diverge do esperado" })
-      .where(eq(webhookEvents.id, webhookEvent.id));
-    throw new Error("Valor do webhook diverge do esperado");
-  }
-
-  const paymentMethod = typeof rawPayload.capture_method === "string" ? rawPayload.capture_method : null;
-
-  let alreadyProcessedByUniqueConstraint = false;
-
-  await db.transaction(async (tx) => {
-    let insertedPayment: typeof payments.$inferSelect | undefined;
-    try {
-      [insertedPayment] = await tx
-        .insert(payments)
-        .values({
-          organizationId: session.organizationId,
-          participantId: session.participantId,
-          gateway: "infinitepay",
-          gatewayPaymentId: parsed.gatewayPaymentId,
-          amount: expectedAmount,
-          status: "confirmed",
-          paidAt: new Date(),
-          paymentMethod,
-        })
-        .returning();
-    } catch (err) {
-      // payments.gateway_payment_id unique: a mesma transaction_nsu ja foi
-      // usada para confirmar um pagamento (corrida entre duas entregas do
-      // mesmo webhook que passaram da checagem de webhook_events ao mesmo
-      // tempo). Trata como idempotencia, nao como erro fatal.
-      if (isUniqueViolation(err)) {
-        alreadyProcessedByUniqueConstraint = true;
-        return;
+    if (session.status === "completed") {
+      const [existingPayment] = await tx
+        .select({ id: payments.id })
+        .from(payments)
+        .where(eq(payments.gatewayPaymentId, input.gatewayPaymentId));
+      if (!existingPayment) {
+        throw new PaymentConfirmationError("completed_without_payment", "Sessão concluída sem pagamento correspondente");
       }
-      throw err;
+      if (input.webhookEventId) {
+        await tx
+          .update(webhookEvents)
+          .set({ processingStatus: "processed", processedAt: new Date(), errorMessage: null })
+          .where(eq(webhookEvents.id, input.webhookEventId));
+      }
+      return { alreadyProcessed: true, paymentId: existingPayment.id };
     }
 
-    if (!insertedPayment) return;
+    const expiredButReconcilable =
+      session.status === "expired" &&
+      (session.externalCreationState === "linked" || session.externalCreationState === "ambiguous");
+    if (session.status !== "created" && session.status !== "pending" && !expiredButReconcilable) {
+      throw new PaymentConfirmationError("session_not_payable", "Sessão não está disponível para confirmação");
+    }
+
+    const items = await tx.select().from(checkoutItems).where(eq(checkoutItems.checkoutSessionId, session.id));
+    if (items.length === 0) throw new PaymentConfirmationError("empty_checkout", "Checkout sem cobranças");
+
+    const expectedAmount = items.reduce((sum, item) => sum + item.amount, 0);
+    if (input.amount !== expectedAmount) {
+      throw new PaymentConfirmationError("amount_mismatch", "Valor confirmado diverge do checkout");
+    }
+
+    const itemChargeIds = items.map((item) => item.chargeId);
+    const currentCharges = await tx
+      .select({ id: charges.id, status: charges.status })
+      .from(charges)
+      .where(inArray(charges.id, itemChargeIds));
+    const acceptableChargeStatuses = expiredButReconcilable
+      ? new Set(["open", "checkout_pending"])
+      : new Set(["checkout_pending"]);
+    if (
+      currentCharges.length !== items.length ||
+      currentCharges.some((charge) => !acceptableChargeStatuses.has(charge.status))
+    ) {
+      throw new PaymentConfirmationError(
+        "charge_state_mismatch",
+        "Uma ou mais cobranças não pertencem mais a este checkout",
+      );
+    }
+
+    const [otherSession] = await tx
+      .select({ id: checkoutSessions.id })
+      .from(checkoutSessions)
+      .where(
+        and(
+          eq(checkoutSessions.gatewayPaymentId, input.gatewayPaymentId),
+          ne(checkoutSessions.id, session.id),
+        ),
+      );
+    if (otherSession) {
+      throw new PaymentConfirmationError("payment_reused", "Transação já vinculada a outro checkout");
+    }
+
+    const insertedCharges = await tx
+      .update(charges)
+      .set({ status: "paid", updatedAt: new Date() })
+      .where(
+        and(
+          inArray(charges.id, itemChargeIds),
+          inArray(charges.status, expiredButReconcilable ? ["open", "checkout_pending"] : ["checkout_pending"]),
+        ),
+      )
+      .returning({ id: charges.id });
+    if (insertedCharges.length !== items.length) {
+      throw new PaymentConfirmationError("charge_race", "As cobranças mudaram durante a confirmação");
+    }
+
+    const [payment] = await tx
+      .insert(payments)
+      .values({
+        organizationId: session.organizationId,
+        participantId: session.participantId,
+        gateway: "infinitepay",
+        gatewayPaymentId: input.gatewayPaymentId,
+        amount: expectedAmount,
+        status: "confirmed",
+        paidAt: new Date(),
+        paymentMethod: input.paymentMethod,
+      })
+      .onConflictDoNothing({ target: payments.gatewayPaymentId })
+      .returning();
+    if (!payment) {
+      throw new PaymentConfirmationError("payment_reused", "Transação InfinitePay já processada");
+    }
 
     await tx.insert(paymentAllocations).values(
       items.map((item) => ({
-        paymentId: insertedPayment.id,
+        paymentId: payment.id,
         chargeId: item.chargeId,
         amount: item.amount,
       })),
     );
 
-    const chargeIds = items.map((item) => item.chargeId);
-    if (chargeIds.length > 0) {
-      await tx
-        .update(charges)
-        .set({ status: "paid" })
-        .where(and(inArray(charges.id, chargeIds), eq(charges.status, "checkout_pending")));
-    }
-
-    await tx.update(checkoutSessions).set({ status: "completed" }).where(eq(checkoutSessions.id, session.id));
+    await tx
+      .update(checkoutSessions)
+      .set({
+        status: "completed",
+        gatewayPaymentId: input.gatewayPaymentId,
+        gatewayInvoiceSlug: input.gatewayInvoiceSlug ?? session.gatewayInvoiceSlug,
+        externalCreationState: "linked",
+      })
+      .where(eq(checkoutSessions.id, session.id));
 
     await tx.insert(auditEvents).values({
       organizationId: session.organizationId,
       entityType: "payment",
-      entityId: insertedPayment.id,
-      action: "payment_confirmed_via_webhook",
+      entityId: payment.id,
+      action: input.source === "webhook" ? "payment_confirmed_via_webhook" : "payment_confirmed_via_payment_check",
       actorType: "system",
       metadata: {
-        webhookEventId: webhookEvent.id,
-        gatewayPaymentId: parsed.gatewayPaymentId,
+        checkoutSessionId: session.id,
+        webhookEventId: input.webhookEventId ?? null,
+        gatewayPaymentId: input.gatewayPaymentId,
+        gatewayInvoiceSlug: input.gatewayInvoiceSlug,
         provider: "infinitepay",
       },
     });
+
+    if (input.webhookEventId) {
+      await tx
+        .update(webhookEvents)
+        .set({ processingStatus: "processed", processedAt: new Date(), errorMessage: null })
+        .where(eq(webhookEvents.id, input.webhookEventId));
+    }
+
+    return { alreadyProcessed: false, paymentId: payment.id };
   });
+}
 
-  await db
-    .update(webhookEvents)
-    .set({ processingStatus: "processed", processedAt: new Date() })
-    .where(eq(webhookEvents.id, webhookEvent.id));
+async function prepareWebhookEvent(transactionNsu: string, payloadHash: string) {
+  const [existing] = await db
+    .select()
+    .from(webhookEvents)
+    .where(and(eq(webhookEvents.provider, "infinitepay"), eq(webhookEvents.externalEventId, transactionNsu)));
 
-  return { alreadyProcessed: alreadyProcessedByUniqueConstraint };
+  if (existing) {
+    if (existing.payloadHash !== payloadHash) throw new WebhookReplayMismatchError();
+    if (existing.processingStatus === "processed") return { event: existing, alreadyProcessed: true };
+
+    const [retrying] = await db
+      .update(webhookEvents)
+      .set({ processingStatus: "processing", errorMessage: null })
+      .where(eq(webhookEvents.id, existing.id))
+      .returning();
+    return { event: retrying, alreadyProcessed: false };
+  }
+
+  const [inserted] = await db
+    .insert(webhookEvents)
+    .values({
+      provider: "infinitepay",
+      externalEventId: transactionNsu,
+      eventType: "payment.confirmed",
+      payloadHash,
+      processingStatus: "processing",
+    })
+    .onConflictDoNothing({ target: [webhookEvents.provider, webhookEvents.externalEventId] })
+    .returning();
+  if (inserted) return { event: inserted, alreadyProcessed: false };
+
+  // Outra entrega validada venceu a corrida do INSERT. Releia e aplique as
+  // mesmas regras de hash/estado; a confirmação central é serializada pela
+  // sessão, então duas entregas podem avançar sem duplicar efeitos.
+  return prepareWebhookEvent(transactionNsu, payloadHash);
+}
+
+export async function processInfinitePayWebhook(
+  rawBody: string,
+  token: string | null,
+): Promise<{ alreadyProcessed: boolean }> {
+  const parsedPayload = webhookPayloadSchema.safeParse(JSON.parse(rawBody));
+  if (!parsedPayload.success) throw new Error("Payload do webhook InfinitePay inválido");
+  const payload = parsedPayload.data;
+
+  const adapter = getPaymentsAdapter("infinitepay");
+  if (!(await adapter.validateWebhook(rawBody, token))) throw new InvalidWebhookSignatureError();
+
+  // A sessão e o token são verificados antes de o external_event_id ocupar a
+  // chave de idempotência. Isso impede que uma requisição não autenticada
+  // envenene o transaction_nsu de uma entrega legítima futura.
+  const [session] = await db.select().from(checkoutSessions).where(eq(checkoutSessions.id, payload.order_nsu));
+  if (!session || session.gateway !== "infinitepay") throw new InvalidWebhookSignatureError();
+  if (session.status === "completed" && session.gatewayPaymentId !== payload.transaction_nsu) {
+    throw new WebhookReplayMismatchError("Sessão concluída recebeu outra transação");
+  }
+  if (
+    session.status === "canceled" ||
+    (session.status === "expired" && !["linked", "ambiguous"].includes(session.externalCreationState))
+  ) {
+    throw new PaymentConfirmationError("session_not_payable", "Sessão cancelada ou expirada");
+  }
+
+  const payloadHash = sha256Hex(rawBody);
+  const { event, alreadyProcessed } = await prepareWebhookEvent(payload.transaction_nsu, payloadHash);
+  if (alreadyProcessed) return { alreadyProcessed: true };
+
+  try {
+    const result = await confirmInfinitePayPayment({
+      sessionId: session.id,
+      gatewayPaymentId: payload.transaction_nsu,
+      gatewayInvoiceSlug: payload.invoice_slug ?? null,
+      amount: payload.amount,
+      paymentMethod: payload.capture_method ?? null,
+      source: "webhook",
+      webhookEventId: event.id,
+    });
+    return { alreadyProcessed: result.alreadyProcessed };
+  } catch (error) {
+    await db
+      .update(webhookEvents)
+      .set({
+        processingStatus: "failed",
+        errorMessage: error instanceof PaymentConfirmationError ? error.code : "confirmation_failed",
+      })
+      .where(eq(webhookEvents.id, event.id));
+    throw error;
+  }
+}
+
+export async function checkInfinitePayPayment(input: {
+  sessionId: string;
+  recoveryToken: string;
+  transactionNsu: string;
+  invoiceSlug: string;
+}): Promise<{ status: "pending" | "confirmed"; alreadyProcessed: boolean }> {
+  const [session] = await db.select().from(checkoutSessions).where(eq(checkoutSessions.id, input.sessionId));
+  if (!session || session.gateway !== "infinitepay" || !matchesCheckoutToken(input.recoveryToken, session.recoveryTokenHash)) {
+    throw new InvalidRecoveryTokenError();
+  }
+  if (session.gatewayPaymentId && session.gatewayPaymentId !== input.transactionNsu) {
+    throw new PaymentConfirmationError("payment_mismatch", "A sessão já está vinculada a outra transação");
+  }
+  if (session.gatewayInvoiceSlug && session.gatewayInvoiceSlug !== input.invoiceSlug) {
+    throw new PaymentConfirmationError("invoice_mismatch", "A sessão já está vinculada a outra fatura");
+  }
+  if (session.status === "completed") return { status: "confirmed", alreadyProcessed: true };
+  if (
+    session.status === "canceled" ||
+    (session.status === "expired" && !["linked", "ambiguous"].includes(session.externalCreationState))
+  ) {
+    throw new PaymentConfirmationError("session_not_payable", "Sessão cancelada ou expirada");
+  }
+
+  let gatewayHandle = session.gatewayExternalAccountIdSnapshot;
+  if (!gatewayHandle && session.gatewayAccountId) {
+    const [snapshottedAccount] = await db
+      .select({ externalAccountId: gatewayAccounts.externalAccountId })
+      .from(gatewayAccounts)
+      .where(
+        and(
+          eq(gatewayAccounts.id, session.gatewayAccountId),
+          eq(gatewayAccounts.organizationId, session.organizationId),
+          eq(gatewayAccounts.provider, "infinitepay"),
+        ),
+      );
+    gatewayHandle = snapshottedAccount?.externalAccountId ?? null;
+  }
+  // Fallback estritamente legado. Novas sessões sempre persistem o snapshot;
+  // o status atual da configuração deliberadamente não interfere na
+  // reconciliação de um checkout já criado.
+  if (!gatewayHandle) {
+    const [legacyAccount] = await db
+      .select({ externalAccountId: gatewayAccounts.externalAccountId })
+      .from(gatewayAccounts)
+      .where(
+        and(
+          eq(gatewayAccounts.organizationId, session.organizationId),
+          eq(gatewayAccounts.provider, "infinitepay"),
+        ),
+      );
+    gatewayHandle = legacyAccount?.externalAccountId ?? null;
+  }
+  if (!gatewayHandle) throw new PaymentConfirmationError("gateway_snapshot_missing", "Snapshot da InfinitePay ausente");
+
+  const checked = await getPaymentsAdapter("infinitepay").getPayment({
+    gatewayPaymentId: input.transactionNsu,
+    gatewayExternalAccountId: gatewayHandle,
+    externalReference: session.id,
+    invoiceSlug: input.invoiceSlug,
+  });
+  if (checked.status !== "confirmed") return { status: "pending", alreadyProcessed: false };
+
+  const confirmed = await confirmInfinitePayPayment({
+    sessionId: session.id,
+    gatewayPaymentId: input.transactionNsu,
+    gatewayInvoiceSlug: input.invoiceSlug,
+    amount: checked.amount,
+    paymentMethod: checked.paymentMethod,
+    source: "payment_check",
+  });
+  return { status: "confirmed", alreadyProcessed: confirmed.alreadyProcessed };
 }

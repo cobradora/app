@@ -1,10 +1,19 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import favicon from "@/images/favicon.png";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Groupay — Gestão de cobranças recorrentes",
-  description: "Organize grupos, acompanhe competências e concilie pagamentos em um só lugar.",
+  title: {
+    default: "CobraDora — Cobranças para grupos",
+    template: "%s · CobraDora",
+  },
+  description: "Organize grupos, acompanhe pagamentos e cobre sem enrolação com a CobraDora.",
+  icons: {
+    icon: [{ url: favicon.src, type: "image/png" }],
+    shortcut: favicon.src,
+    apple: favicon.src,
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

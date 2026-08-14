@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireOrganization, UnauthorizedError } from "@/lib/auth-context";
+import { requireAdmin, requireOrganization, ForbiddenError, UnauthorizedError } from "@/lib/auth-context";
 import { createGroup, createGroupInput, listGroups } from "@/services/groups";
 import { z } from "zod";
 
@@ -12,13 +12,16 @@ export async function GET() {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
+    if (err instanceof ForbiddenError) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
     throw err;
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const session = await requireOrganization();
+    const session = await requireAdmin();
     const body = await request.json();
     const input = createGroupInput.parse(body);
     const group = await createGroup(session.organizationId, input);
@@ -26,6 +29,9 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    if (err instanceof ForbiddenError) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
     }
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: "validation_error", issues: err.issues }, { status: 400 });

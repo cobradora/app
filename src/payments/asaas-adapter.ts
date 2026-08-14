@@ -1,4 +1,11 @@
-import type { PaymentsAdapter, CreateCheckoutInput, CreateCheckoutResult, GatewayPayment, ParsedWebhookEvent } from "./adapter";
+import type {
+  PaymentsAdapter,
+  CreateCheckoutInput,
+  CreateCheckoutResult,
+  GatewayPayment,
+  GetPaymentInput,
+  ParsedWebhookEvent,
+} from "./adapter";
 import { createHmac } from "node:crypto";
 
 export function calculateAsaasCharge(input: {
@@ -60,7 +67,8 @@ export function createAsaasAdapter(): PaymentsAdapter {
       };
     },
 
-    async getPayment(gatewayPaymentId: string): Promise<GatewayPayment> {
+    async getPayment(input: GetPaymentInput): Promise<GatewayPayment> {
+      const gatewayPaymentId = input.gatewayPaymentId;
       const response = await fetch(`${apiUrl}/payments/${gatewayPaymentId}`, {
         headers: { access_token: apiKey },
       });

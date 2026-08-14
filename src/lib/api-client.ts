@@ -68,7 +68,9 @@ export type AddParticipantInput = {
 };
 
 export type UpdateGroupInput = {
-  name: string;
+  name?: string;
+  billingDay?: number;
+  defaultAmount?: number;
 };
 
 export type UpdateParticipantInput = {
@@ -80,10 +82,37 @@ export type CheckoutResult = {
   checkoutSessionId: string;
   checkoutUrl: string;
   totalChargesAmount: number;
+  payerName: string;
+  resumed: boolean;
+};
+
+export type CheckoutPaymentStatus = {
+  status: "pending" | "confirmed";
+  alreadyProcessed: boolean;
+};
+
+export type AddParticipantResult = {
+  participant: {
+    id: string;
+    name: string;
+    phoneNormalized: string;
+    phoneDisplay: string;
+    financialRole: "responsible" | "dependent";
+  };
+  startsNextCycle: boolean;
+  nextCycleReferenceMonth: string;
+};
+
+export type OrganizationSettings = {
+  messageIntro: string;
+  messageOutro: string;
 };
 
 export type PendingCharge = {
   chargeId: string;
+  participantId: string;
+  participantName: string;
+  payerName: string;
   totalAmount: number;
   dueDate: string;
   referenceMonth: string;
@@ -157,6 +186,21 @@ export const apiClient = {
     return data.account;
   },
 
+  /** GET /api/settings — partes editáveis da mensagem; a lista é sempre gerada pelo sistema. */
+  async getOrganizationSettings() {
+    const data = await request<{ settings: OrganizationSettings }>("/api/settings", { method: "GET" });
+    return data.settings;
+  },
+
+  /** PATCH /api/settings — persiste somente introdução/encerramento da mensagem. */
+  async updateOrganizationSettings(input: OrganizationSettings) {
+    const data = await request<{ settings: OrganizationSettings }>("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+    return data.settings;
+  },
+
   /** POST /api/auth/logout — limpa o cookie de sessao. */
   async logout() {
     await request<{ ok: true }>("/api/auth/logout", { method: "POST" });
@@ -208,15 +252,6 @@ export const apiClient = {
     return data.charges;
   },
 
-  /** POST /api/groups/:groupId/billing-periods */
-  async generateBillingPeriod(groupId: string, referenceMonth: string) {
-    const data = await request<{ billingPeriod: unknown }>(`/api/groups/${groupId}/billing-periods`, {
-      method: "POST",
-      body: JSON.stringify({ referenceMonth }),
-    });
-    return data.billingPeriod;
-  },
-
   /** POST /api/charges/:chargeId/manual-settlement */
   async registerManualSettlement(chargeId: string, input: ManualSettlementInput) {
     await request<{ ok: true }>(`/api/charges/${chargeId}/manual-settlement`, {
@@ -238,11 +273,10 @@ export const apiClient = {
    * telefone) o participante e ja o vincula ao grupo em uma unica chamada.
    */
   async addParticipant(groupId: string, input: AddParticipantInput) {
-    const data = await request<{ participant: unknown }>(`/api/groups/${groupId}/participants`, {
+    return request<AddParticipantResult>(`/api/groups/${groupId}/participants`, {
       method: "POST",
       body: JSON.stringify(input),
     });
-    return data.participant;
   },
 
   /** DELETE /api/groups/:groupId/participants/:participantId — desvincula (soft) o participante do grupo. */
@@ -287,11 +321,11 @@ export const apiClient = {
     return (data as { group: PublicGroupSummary }).group;
   },
 
-  /** GET /api/public/groups/:groupPublicSlug/pending-charges?phone=... (rota publica, sem sessao) */
+  /** POST /api/public/groups/:groupPublicSlug/pending-charges (telefone fica fora da URL e de logs comuns). */
   async listPendingCharges(groupPublicSlug: string, phone: string) {
     const data = await request<{ pending: PendingCharge[] }>(
-      `/api/public/groups/${groupPublicSlug}/pending-charges?phone=${encodeURIComponent(phone)}`,
-      { method: "GET" },
+      `/api/public/groups/${groupPublicSlug}/pending-charges`,
+      { method: "POST", body: JSON.stringify({ phone }) },
     );
     return data.pending;
   },
@@ -309,5 +343,17 @@ export const apiClient = {
       body: JSON.stringify({ phone, chargeIds, idempotencyKey }),
     });
     return data.checkout;
+  },
+
+  /** Confirma o retorno do gateway no servidor; a navegação nunca baixa a cobrança diretamente. */
+  async checkCheckoutPayment(
+    checkoutSessionId: string,
+    input: { recoveryToken: string; transactionNsu: string; invoiceSlug: string },
+  ) {
+    const data = await request<{ payment: CheckoutPaymentStatus }>(
+      `/api/public/checkout-sessions/${encodeURIComponent(checkoutSessionId)}/payment-check`,
+      { method: "POST", body: JSON.stringify(input), cache: "no-store" },
+    );
+    return data.payment;
   },
 };

@@ -31,20 +31,13 @@ export async function getInfinitePayAccount(organizationId: string) {
  */
 export async function setInfinitePayHandle(organizationId: string, rawInput: SetInfinitePayHandleInput) {
   const input = setInfinitePayHandleInput.parse(rawInput);
-  const existing = await getInfinitePayAccount(organizationId);
-
-  if (existing) {
-    const [updated] = await db
-      .update(gatewayAccounts)
-      .set({ externalAccountId: input.handle, status: "active" })
-      .where(eq(gatewayAccounts.id, existing.id))
-      .returning();
-    return updated;
-  }
-
-  const [created] = await db
+  const [account] = await db
     .insert(gatewayAccounts)
     .values({ organizationId, provider: "infinitepay", externalAccountId: input.handle, status: "active" })
+    .onConflictDoUpdate({
+      target: [gatewayAccounts.organizationId, gatewayAccounts.provider],
+      set: { externalAccountId: input.handle, status: "active" },
+    })
     .returning();
-  return created;
+  return account;
 }

@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireOrganization, UnauthorizedError } from "@/lib/auth-context";
-import { updateParticipant, updateParticipantInput } from "@/services/participants";
+import { requireAdmin, ForbiddenError, UnauthorizedError } from "@/lib/auth-context";
+import {
+  ParticipantCheckoutInProgressError,
+  ParticipantNameConflictError,
+  updateParticipant,
+  updateParticipantInput,
+} from "@/services/participants";
 import { z } from "zod";
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ participantId: string }> }) {
   try {
-    const session = await requireOrganization();
+    const session = await requireAdmin();
     const { participantId } = await params;
     const input = updateParticipantInput.parse(await request.json());
 
@@ -17,6 +22,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    if (err instanceof ForbiddenError) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+    if (err instanceof ParticipantNameConflictError) {
+      return NextResponse.json({ error: "participant_name_conflict", message: err.message }, { status: 409 });
+    }
+    if (err instanceof ParticipantCheckoutInProgressError) {
+      return NextResponse.json({ error: "participant_checkout_in_progress", message: err.message }, { status: 409 });
     }
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: "validation_error", issues: err.issues }, { status: 400 });

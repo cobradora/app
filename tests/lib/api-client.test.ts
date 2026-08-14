@@ -122,18 +122,6 @@ describe("apiClient", () => {
     expect(charges[0].groupName).toBe("Vôlei");
   });
 
-  it("generateBillingPeriod faz POST /api/groups/:groupId/billing-periods e retorna billingPeriod", async () => {
-    mockFetchOnce({ ok: true, json: async () => ({ billingPeriod: { id: "bp1", referenceMonth: "2026-08" } }) });
-
-    const period = await apiClient.generateBillingPeriod("g1", "2026-08");
-
-    expect(global.fetch).toHaveBeenCalledWith(
-      "/api/groups/g1/billing-periods",
-      expect.objectContaining({ method: "POST", body: JSON.stringify({ referenceMonth: "2026-08" }) }),
-    );
-    expect(period).toEqual({ id: "bp1", referenceMonth: "2026-08" });
-  });
-
   it("registerManualSettlement faz POST /api/charges/:chargeId/manual-settlement", async () => {
     mockFetchOnce({ ok: true, json: async () => ({ ok: true }) });
 
@@ -148,14 +136,14 @@ describe("apiClient", () => {
     );
   });
 
-  it("listPendingCharges faz GET na rota publica com o telefone via query string", async () => {
+  it("listPendingCharges faz POST sem expor o telefone na URL", async () => {
     mockFetchOnce({ ok: true, json: async () => ({ pending: [{ chargeId: "c1", totalAmount: 8000 }] }) });
 
     const pending = await apiClient.listPendingCharges("volei-quarta-ab12", "(11) 98812-4410");
 
     expect(global.fetch).toHaveBeenCalledWith(
-      "/api/public/groups/volei-quarta-ab12/pending-charges?phone=" + encodeURIComponent("(11) 98812-4410"),
-      expect.objectContaining({ method: "GET" }),
+      "/api/public/groups/volei-quarta-ab12/pending-charges",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ phone: "(11) 98812-4410" }) }),
     );
     expect(pending).toEqual([{ chargeId: "c1", totalAmount: 8000 }]);
   });

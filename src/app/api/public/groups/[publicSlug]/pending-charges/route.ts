@@ -2,17 +2,37 @@ import { NextRequest, NextResponse } from "next/server";
 import { listPendingChargesByPhone } from "@/services/pending-charges";
 import { z } from "zod";
 
-const queryInput = z.object({ phone: z.string().min(8) });
+const MAX_BODY_BYTES = 512;
+const lookupInput = z.object({ phone: z.string().min(10).max(20) }).strict();
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ publicSlug: string }> }) {
-  const { publicSlug } = await params;
-  const phone = request.nextUrl.searchParams.get("phone") ?? "";
+function noStoreJson(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { "Cache-Control": "private, no-store, max-age=0" },
+  });
+}
 
-  const parsed = queryInput.safeParse({ phone });
-  if (!parsed.success) {
-    return NextResponse.json({ error: "validation_error" }, { status: 400 });
+export async function POST(request: NextRequest, { params }: { params: Promise<{ publicSlug: string }> }) {
+  const rawBody = await request.text();
+  if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
+    return noStoreJson({ error: "request_too_large" }, 413);
   }
 
-  const pending = await listPendingChargesByPhone(publicSlug, parsed.data.phone);
-  return NextResponse.json({ pending });
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(rawBody);
+  } catch {
+    return noStoreJson({ error: "invalid_json" }, 400);
+  }
+
+  const input = lookupInput.safeParse(parsedJson);
+  if (!input.success) {
+    // Mesma forma de resposta de um telefone válido sem cobranças: não
+    // confirma publicamente se o número existe na organização.
+    return noStoreJson({ pending: [] });
+  }
+
+  const { publicSlug } = await params;
+  const pending = await listPendingChargesByPhone(publicSlug, input.data.phone);
+  return noStoreJson({ pending });
 }

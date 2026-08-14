@@ -1,138 +1,76 @@
-# Groupay
+# CobraDora
 
-Plataforma SaaS para gestão de cobranças recorrentes em grupos esportivos.
+Assistente de cobranças recorrentes para grupos de WhatsApp. A aplicação reúne visão mensal, grupos, pendências e configurações em uma única tela e usa a InfinitePay para checkout.
 
-## Resumo
+## Stack
 
-O Groupay elimina o trabalho manual de organizadores de grupos com mensalistas (vôlei, futebol, basquete, handebol, beach tennis). A plataforma fornece:
+- Next.js 16, React 19 e TypeScript
+- PostgreSQL com Drizzle ORM
+- Vitest
+- Vercel Cron para renovação automática dos ciclos
 
-- Cadastro de grupos e participantes
-- Controle por competência (mês/ano)
-- Link permanente de pagamento por grupo
-- Conciliação automática via webhook + baixa manual
-- Painel de pagos e pendentes
-- Histórico completo
+## Regras centrais
 
-## Arquitetura
+- Cada grupo tem seu próprio dia de renovação (1 a 28).
+- O Cron gera as cobranças vencidas de forma idempotente e recupera ciclos atrasados.
+- Quem entra no dia da renovação ou depois começa somente no próximo ciclo; a API devolve esse aviso ao painel.
+- O telefone identifica um contato financeiro dentro da organização, não uma pessoa.
+- Participantes com o mesmo telefone continuam sendo devedores independentes; o primeiro é o responsável financeiro e os seguintes são dependentes.
+- A consulta pública pelo telefone mostra as cobranças do responsável e dos dependentes no grupo do link.
+- A InfinitePay recebe o nome e o telefone do responsável financeiro.
+- Nomes equivalentes após normalização não podem coexistir no mesmo grupo.
+- Uma cobrança só vira paga por webhook validado, `payment_check` confirmado ou baixa manual administrativa.
+- Abandono, erro de rede e retorno do navegador nunca confirmam pagamento por conta própria.
 
-**Estilo:** Monólito modular (MVP)
-- Next.js 16 (App Router)
-- React 19 + TypeScript
-- Tailwind CSS 4
-- PostgreSQL + Drizzle ORM
-- Drizzle Kit para migrations
-
-## Estrutura de Pastas
-
-```
-src/
-├── app/                    # Rotas do Next.js (App Router)
-│   ├── api/health/         # Healthcheck da aplicação
-│   ├── globals.css         # Estilos globais e tema visual
-│   ├── layout.tsx          # Layout raiz
-│   └── page.tsx            # Dashboard principal
-├── components/             # Componentes React
-│   └── groupay-dashboard.tsx  # Interface completa do dashboard
-├── db/                     # Camada de banco de dados
-│   ├── index.ts            # Cliente Drizzle
-│   └── schema.ts           # Schema das tabelas
-└── lib/                    # Utilitários e dados
-    └── mock-data.ts        # Dados simulados (pronto para API)
-```
-
-## Regras de Negócio Principais
-
-- **RB-001:** Cada grupo possui link público permanente
-- **RB-002:** Telefone localiza participante, mas não é chave primária
-- **RB-003:** Participante pode pertencer a vários grupos (N:N)
-- **RB-004:** Competência é imutável como referência histórica
-- **RB-005:** Pendências acumulam (julho + agosto = ambas visíveis)
-- **RB-006:** Valor vem do backend (cliente não informa valor)
-- **RB-007:** Pagamento confirmado apenas por fonte confiável
-- **RB-008:** Webhook é idempotente
-- **RB-009:** Checkout com proteção contra duplicidade
-- **RB-010:** Pagamento manual sempre possível
-- **RB-011:** Origem da baixa é registrada (ator, data, observação)
-- **RB-012:** Pagamento confirmado não é apagado (eventos compensatórios)
-- **RB-013:** Split é regra de liquidação, não de cobrança
-- **RB-014:** Gateway é abstraído (não depende de IDs específicos)
-- **RB-015:** WhatsApp não participa do fluxo transacional
-- **RB-016:** Multi-tenant desde o início
-- **RB-017:** Alterações de valor são auditadas
-- **RB-018:** Participante removido não apaga histórico
-- **RB-019:** Uma cobrança representa uma obrigação distinta
-- **RB-020:** Reprocessamento seguro (sem duplicar efeitos)
-
-## Telas Funcionais
-
-### Navegação Principal
-- **Visão Geral** — Resumo financeiro, grupos ativos, pendências do mês
-- **Grupos** — Lista de grupos com progresso de pagamento
-- **Cobrança** — Todas as cobranças com filtros (Todas/Pendentes/Pagas)
-- **Configurações** — Chave PIX, gateway, modelo de cobrança
-
-### Detalhe do Grupo
-- Participantes do grupo com situação de pagamento
-- Botões: Copiar link, Copiar mensagem, Link de pagamento
-- Adicionar novo participante
-- Baixa manual individual
-
-### Checkout Nativo (Link de Pagamento)
-1. **Identificação** — Campo de celular para localizar participante
-2. **Confirmação** — Exibe pendência, solicita nome completo, mostra chave PIX
-
-### Mensagem de Cobrança
-Texto gerado automaticamente com:
-- Saudação do grupo
-- Lista de jogadores com indicadores ✅ (pago) / 🔴 (pendente)
-- Link de pagamento
-- Assinatura amigável
-
-## Design System
-
-- **Fundo:** Branco com pontilhado espaçado (22px)
-- **Tipografia:** Carvão (`#24282a`), títulos em Georgia
-- **Elementos:** Bordas e molduras em cinza claro/prata, **sem arredondamentos**
-- **Cards de status:**
-  - Verde semitransparente (`rgba(202,231,215,0.4)`) — recebido
-  - Vermelho semitransparente (`rgba(242,211,210,0.42)`) — pendente
-- **Identificação:** Grupos identificados por nome completo (sem badges de iniciais)
-- **Responsividade:** Layout fluido, menu lateral vira drawer em mobile
-
-## Como Executar
+## Execução local
 
 ```bash
-# Instalar dependências
 npm install
-
-# Executar em desenvolvimento
 npm run dev
+```
 
-# Build de produção
-npm run build
+Validações:
 
-# Validação de tipos
+```bash
 npm run typecheck
-
-# Aplicar schema no banco (quando DATABASE_URL configurado)
-npx drizzle-kit push
+npm test
+npm run build
 ```
 
-## Variáveis de Ambiente
+O PostgreSQL local pode ser iniciado com `docker compose up -d db`. Consulte `.env.example` para as variáveis necessárias.
 
-```env
-DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/app_db
+## Banco e migrations
+
+O schema está em `src/db/schema.ts`. As migrations Drizzle ficam em `drizzle/` e suas cópias para Supabase em `supabase/migrations/`.
+
+```bash
+# Gera uma migration a partir do schema
+npm run db:generate
+
+# Aplica somente no banco local configurado em .env.local
+npm run db:migrate
+
+# Aplica no banco de teste configurado em .env.test
+npm run db:migrate:test
 ```
 
-## Próximos Passos (Roadmap)
+A migration `0004_lowly_clea.sql` faz a transição aditiva para contatos financeiros, ciclos e recuperação de checkout. Ela contém verificações prévias e interrompe a execução se encontrar telefones legados inválidos, nomes normalizados duplicados ou alocações incompatíveis. Revise os dados antes de qualquer aplicação em produção.
 
-- [ ] Integração com gateway de pagamento (Stripe, Pagar.me, etc.)
-- [ ] Webhooks para conciliação automática
-- [ ] Sistema de planos e comissões
-- [ ] Relatórios financeiros exportáveis
-- [ ] Notificações por email
-- [ ] App mobile (PWA)
+## Renovação automática
 
-## Licença
+`vercel.json` agenda `GET /api/cron/renewals` diariamente. A rota exige `Authorization: Bearer <CRON_SECRET>` e o segredo deve ter pelo menos 32 caracteres. O agendamento só passa a existir após um deploy de produção autorizado.
 
-Proprietário — Groupay Team
+## Confirmação InfinitePay
+
+O checkout persiste a sessão e reserva as cobranças antes de chamar o gateway. Um compare-and-set permite um único POST externo: rejeições definitivas podem ser retomadas, enquanto timeout ou resultado ambíguo exigem reconciliação e nunca provocam reenvio automático. URLs vencidas não são reutilizadas; o Cron limpa reservas seguramente expiradas sem liberar cegamente criações ambíguas.
+
+- O webhook usa token derivado por sessão, valida valor e estado e possui idempotência/replay protection.
+- O retorno da InfinitePay consulta `payment_check` com `handle`, `order_nsu`, `transaction_nsu` e `slug`.
+- Cada sessão congela a InfiniteTag/conta usada na criação, então a reconciliação continua correta mesmo após alteração ou desativação da configuração atual.
+- A confirmação de webhook e a de `payment_check` convergem para a mesma transação no banco.
+
+Configure `APP_BASE_URL`, `SESSION_SECRET`, `CRON_SECRET` e, opcionalmente, `PAYMENT_TOKEN_SECRET`. A InfiniteTag é cadastrada na própria tela da organização.
+
+## Limites desta entrega
+
+Nenhuma configuração de produção é migrada automaticamente. Deploy, aplicação de migration em produção, commit e push devem ser feitos somente com autorização explícita.

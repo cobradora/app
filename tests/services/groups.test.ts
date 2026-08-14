@@ -25,7 +25,7 @@ describe("groups service", () => {
       defaultAmount: 8000,
     });
 
-    expect(group.publicSlug).toMatch(/^volei-de-quarta(-[a-z0-9]{4})?$/);
+    expect(group.publicSlug).toMatch(/^volei-de-quarta-[A-Za-z0-9_-]{16}$/);
     expect(group.defaultAmount).toBe(8000);
     expect(group.organizationId).toBe(organizationId);
   });
@@ -94,8 +94,8 @@ describe("groups service", () => {
   it("bloqueia arquivamento de grupo com cobranca em aberto", async () => {
     const group = await createGroup(organizationId, { name: "Grupo com pendencia", billingDay: 5, defaultAmount: 8000 });
     const participant = await findOrCreateParticipantByPhone(organizationId, "(11) 98812-4410");
-    await linkParticipantToGroup(group.id, participant.id);
-    await generateBillingPeriod(group.id, "2026-08");
+    await linkParticipantToGroup(organizationId, group.id, participant.id, new Date("2026-08-01T12:00:00Z"));
+    await generateBillingPeriod(organizationId, group.id, "2026-08");
 
     await expect(archiveGroup(organizationId, group.id)).rejects.toThrow("cobranças em aberto");
 
@@ -106,8 +106,8 @@ describe("groups service", () => {
   it("permite arquivar grupo cujas cobrancas ja foram todas pagas", async () => {
     const group = await createGroup(organizationId, { name: "Grupo quitado", billingDay: 5, defaultAmount: 8000 });
     const participant = await findOrCreateParticipantByPhone(organizationId, "(11) 98812-4410");
-    await linkParticipantToGroup(group.id, participant.id);
-    const period = await generateBillingPeriod(group.id, "2026-08");
+    await linkParticipantToGroup(organizationId, group.id, participant.id, new Date("2026-08-01T12:00:00Z"));
+    const period = await generateBillingPeriod(organizationId, group.id, "2026-08");
     const userId = "11111111-1111-1111-1111-111111111111";
 
     const [pendingCharge] = await db.select().from(charges).where(eq(charges.billingPeriodId, period.id));

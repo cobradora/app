@@ -3,7 +3,10 @@
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
+import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import cobraLogo from "@/images/logo-cobra-sem-fundo.png";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,56 +30,63 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="checkout-fixed">
-      <div className="checkout-card">
-        <span className="checkout-logo">
-          <b /> Groupay
-        </span>
+    <div className="auth-page">
+      <div className="auth-orb auth-orb--one" />
+      <div className="auth-orb auth-orb--two" />
+      <main className="auth-card">
+        <Link className="auth-brand" href="/" aria-label="CobraDora — início">
+          <Image src={cobraLogo} alt="" width={74} height={74} priority />
+          <span><strong>CobraDora</strong><small>Assistente de Cobranças</small></span>
+        </Link>
 
-        <h1>Entrar</h1>
-        <p className="checkout-sub">Acesse o painel da sua organização.</p>
+        <div className="auth-heading">
+          <span className="auth-chip"><CheckCircle2 size={15} /> Área segura</span>
+          <h1>Que bom ter você de volta</h1>
+          <p>Entre para acompanhar seus grupos e pagamentos.</p>
+        </div>
 
-        <form onSubmit={handleSubmit}>
-          <label className="checkout-label" htmlFor="email">
-            Email
-          </label>
-          <div className="checkout-input">
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <label htmlFor="email">E-mail</label>
+          <div className="auth-input">
             <input
               id="email"
               type="email"
               autoComplete="email"
+              inputMode="email"
+              maxLength={254}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
+              placeholder="voce@exemplo.com"
               required
               autoFocus
             />
           </div>
 
-          <label className="checkout-label" htmlFor="password">
-            Senha
-          </label>
-          <div className="checkout-input">
+          <label htmlFor="password">Senha</label>
+          <div className="auth-input">
             <input
               id="password"
               type="password"
               autoComplete="current-password"
+              maxLength={128}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
+              placeholder="Sua senha"
               required
             />
           </div>
 
-          {error && <p className="modal-error">{error}</p>}
+          {error && <p className="form-error" role="alert">{error}</p>}
 
-          <button type="submit" className="solid full" disabled={submitting || !email.trim() || !password.trim()}>
-            {submitting ? "Entrando…" : "Entrar"}
+          <button type="submit" className="button button--primary button--full auth-submit" disabled={submitting || !email.trim() || !password.trim()}>
+            {submitting ? "Entrando…" : <><span>Entrar</span><ArrowRight size={18} /></>}
           </button>
         </form>
 
-        <p className="checkout-hint">
-          Não tem conta? <Link className="link" href="/signup">Criar conta</Link>
+        <p className="auth-switch">
+          Ainda não usa a CobraDora? <Link href="/signup">Criar conta</Link>
         </p>
-      </div>
+      </main>
     </div>
   );
 }

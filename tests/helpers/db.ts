@@ -14,7 +14,9 @@ const TABLES = [
   "billing_periods",
   "group_participants",
   "participants",
+  "financial_contacts",
   "groups",
+  "organization_settings",
   "users",
   "organizations",
 ];
