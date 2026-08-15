@@ -2,7 +2,7 @@
 
 Cópia exata das migrations geradas pelo Drizzle em `../../drizzle/`. Fonte da verdade do schema continua sendo [`src/db/schema.ts`](../../src/db/schema.ts) — sempre que ele mudar, gere a migration nova com `npm run db:generate` e copie o arquivo novo para cá também.
 
-> **A sequência completa `0000` → `0005` serve somente para inicializar um schema `public` vazio.** Em um banco já usado, parcialmente migrado ou que já tenha qualquer objeto da aplicação, nunca reinicie pela `0000`; primeiro inspecione o catálogo conforme o fluxo de diagnóstico abaixo.
+> **A sequência completa `0000` → `0006` serve somente para inicializar um schema `public` vazio.** Em um banco já usado, parcialmente migrado ou que já tenha qualquer objeto da aplicação, nunca reinicie pela `0000`; primeiro inspecione o catálogo conforme o fluxo de diagnóstico abaixo.
 
 Como o `drizzle-kit migrate` não conseguiu se conectar diretamente a este projeto Supabase (rede/conta), aplique os arquivos abaixo manualmente no **SQL Editor** do Supabase (Dashboard → SQL Editor → New query), **nesta ordem, um de cada vez**:
 
@@ -12,6 +12,7 @@ Como o `drizzle-kit migrate` não conseguiu se conectar diretamente a este proje
 4. `0003_sloppy_daimon_hellstrom.sql` — adiciona `users.password_hash`.
 5. `0004_lowly_clea.sql` — reestrutura contatos financeiros, ciclos, configurações e segurança de checkout com backfill validado.
 6. `0005_cloudy_gamma_corps.sql` — adiciona o valor individual de cobrança por participante em cada grupo.
+7. `0006_awesome_bullseye.sql` — adiciona `organization_settings.message_participant_filter` (todos/pagadores/pendentes na mensagem de cobrança).
 
 Depois de rodar as migrations, confira também `financial_contacts` e `organization_settings`. A `0004` interrompe de propósito se encontrar telefone legado inválido, nome normalizado duplicado no mesmo grupo, gateway duplicado ou dupla alocação; corrija os dados reportados antes de tentar novamente.
 

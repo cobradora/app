@@ -108,6 +108,7 @@ export type AddParticipantResult = {
 export type OrganizationSettings = {
   messageIntro: string;
   messageOutro: string;
+  messageParticipantFilter: "all" | "paid" | "pending";
 };
 
 export type PendingCharge = {

@@ -43,6 +43,13 @@
       "when": 1786702030758,
       "tag": "0005_cloudy_gamma_corps",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786746119596,
+      "tag": "0006_awesome_bullseye",
+      "breakpoints": true
     }
   ]
 }

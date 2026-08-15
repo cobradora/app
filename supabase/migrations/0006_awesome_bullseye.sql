@@ -1,0 +1,2 @@
+CREATE TYPE "public"."message_participant_filter" AS ENUM('all', 'paid', 'pending');--> statement-breakpoint
+ALTER TABLE "organization_settings" ADD COLUMN "message_participant_filter" "message_participant_filter" DEFAULT 'all' NOT NULL;

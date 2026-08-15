@@ -10,8 +10,15 @@ export const updateOrganizationSettingsInput = z
   .object({
     messageIntro: messagePart.optional(),
     messageOutro: messagePart.optional(),
+    messageParticipantFilter: z.enum(["all", "paid", "pending"]).optional(),
   })
-  .refine((value) => value.messageIntro !== undefined || value.messageOutro !== undefined, "Informe ao menos um campo");
+  .refine(
+    (value) =>
+      value.messageIntro !== undefined ||
+      value.messageOutro !== undefined ||
+      value.messageParticipantFilter !== undefined,
+    "Informe ao menos um campo",
+  );
 
 export type UpdateOrganizationSettingsInput = z.infer<typeof updateOrganizationSettingsInput>;
 
@@ -42,6 +49,7 @@ export async function updateOrganizationSettings(
       organizationId,
       messageIntro: input.messageIntro ?? "",
       messageOutro: input.messageOutro ?? "",
+      messageParticipantFilter: input.messageParticipantFilter ?? "all",
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({

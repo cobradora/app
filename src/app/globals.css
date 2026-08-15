@@ -890,6 +890,41 @@ ul {
   box-shadow: 0 0 0 4px rgba(240, 107, 131, 0.13);
 }
 
+.message-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 4px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.message-filter legend {
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.67rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.message-filter label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--brown);
+  cursor: pointer;
+}
+
+.message-filter input[type="radio"] {
+  accent-color: var(--pink);
+}
+
 .message-preview {
   overflow: hidden;
   border: 1px solid rgba(107, 62, 46, 0.14);

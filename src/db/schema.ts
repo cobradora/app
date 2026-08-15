@@ -25,6 +25,7 @@ export const participantStatusEnum = pgEnum("participant_status", ["active", "in
 export const financialRoleEnum = pgEnum("financial_role", ["responsible", "dependent"]);
 export const groupParticipantStatusEnum = pgEnum("group_participant_status", ["active", "left"]);
 export const billingPeriodStatusEnum = pgEnum("billing_period_status", ["open", "closed"]);
+export const messageParticipantFilterEnum = pgEnum("message_participant_filter", ["all", "paid", "pending"]);
 export const chargeStatusEnum = pgEnum("charge_status", [
   "open",
   "checkout_pending",
@@ -77,6 +78,7 @@ export const organizationSettings = pgTable("organization_settings", {
     .references(() => organizations.id),
   messageIntro: varchar("message_intro", { length: 1000 }).notNull().default(""),
   messageOutro: varchar("message_outro", { length: 1000 }).notNull().default(""),
+  messageParticipantFilter: messageParticipantFilterEnum("message_participant_filter").notNull().default("all"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

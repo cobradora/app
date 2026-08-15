@@ -273,6 +273,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   const [cycleError, setCycleError] = useState("");
   const [messageIntro, setMessageIntro] = useState(DEFAULT_MESSAGE_INTRO);
   const [messageOutro, setMessageOutro] = useState(DEFAULT_MESSAGE_OUTRO);
+  const [messageParticipantFilter, setMessageParticipantFilter] = useState<"all" | "paid" | "pending">("all");
   const [messageSaving, setMessageSaving] = useState(false);
   const [messageError, setMessageError] = useState("");
   const [previewGroupId, setPreviewGroupId] = useState("");
@@ -303,7 +304,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     : null;
   const previewGroup = activeGroups.find((group) => group.id === previewGroupId) ?? activeGroups[0] ?? null;
   const previewRows = previewGroup
-    ? periodCharges.filter((charge) => charge.groupId === previewGroup.id)
+    ? periodCharges.filter((charge) => charge.groupId === previewGroup.id && matchesMessageFilter(charge.status))
     : [];
 
   function flash(message: string) {
@@ -418,6 +419,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
         if (cancelled) return;
         setMessageIntro(settings.messageIntro || DEFAULT_MESSAGE_INTRO);
         setMessageOutro(settings.messageOutro || DEFAULT_MESSAGE_OUTRO);
+        setMessageParticipantFilter(settings.messageParticipantFilter || "all");
       })
       .catch(() => {
         if (!cancelled) setMessageError("As mensagens padrão estão em uso; não foi possível carregar a personalização.");
@@ -589,9 +591,16 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     return `${window.location.origin}/g/${group.publicSlug}`;
   }
 
+  function matchesMessageFilter(status: "paid" | "pending" | "ignored") {
+    if (messageParticipantFilter === "paid") return status === "paid";
+    if (messageParticipantFilter === "pending") return status === "pending";
+    return true;
+  }
+
   function automaticLines(groupId: string, referenceMonth: string) {
     return charges
       .filter((charge) => charge.groupId === groupId && charge.competence === referenceMonth && charge.status !== "ignored")
+      .filter((charge) => matchesMessageFilter(charge.status))
       .sort((left, right) => (left.participantName ?? "").localeCompare(right.participantName ?? "", "pt-BR"))
       .map(
         (charge) =>
@@ -606,7 +615,15 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     return [
       interpolateMessage(messageIntro.trim() || DEFAULT_MESSAGE_INTRO, group, referenceMonth),
       "",
-      ...(lines.length ? lines : ["A lista de cobranças ainda não foi gerada para esta competência."]),
+      ...(lines.length
+        ? lines
+        : [
+            messageParticipantFilter === "paid"
+              ? "Nenhum pagador ainda nesta competência."
+              : messageParticipantFilter === "pending"
+                ? "Nenhuma pendência nesta competência."
+                : "A lista de cobranças ainda não foi gerada para esta competência.",
+          ]),
       "",
       interpolateMessage(messageOutro.trim() || DEFAULT_MESSAGE_OUTRO, group, referenceMonth),
       memberLink(group),
@@ -1012,9 +1029,11 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       const saved = await apiClient.updateOrganizationSettings({
         messageIntro: messageIntro.trim(),
         messageOutro: messageOutro.trim(),
+        messageParticipantFilter,
       });
       setMessageIntro(saved.messageIntro || DEFAULT_MESSAGE_INTRO);
       setMessageOutro(saved.messageOutro || DEFAULT_MESSAGE_OUTRO);
+      setMessageParticipantFilter(saved.messageParticipantFilter || "all");
       flash("Mensagem de cobrança atualizada.");
     } catch (error) {
       setMessageError(error instanceof Error ? error.message : "Erro ao salvar a mensagem.");
@@ -1194,13 +1213,19 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                   <textarea id="message-intro" rows={4} maxLength={MESSAGE_MAX} value={messageIntro} onChange={(event) => setMessageIntro(event.target.value)} disabled={!isAdmin} />
                   <label htmlFor="message-outro">Encerramento <span>{messageOutro.length}/{MESSAGE_MAX}</span></label>
                   <textarea id="message-outro" rows={4} maxLength={MESSAGE_MAX} value={messageOutro} onChange={(event) => setMessageOutro(event.target.value)} disabled={!isAdmin} />
+                  <fieldset className="message-filter">
+                    <legend>Listar na mensagem</legend>
+                    <label><input type="radio" name="message-participant-filter" checked={messageParticipantFilter === "all"} onChange={() => setMessageParticipantFilter("all")} disabled={!isAdmin} /> Todos</label>
+                    <label><input type="radio" name="message-participant-filter" checked={messageParticipantFilter === "paid"} onChange={() => setMessageParticipantFilter("paid")} disabled={!isAdmin} /> Pagadores</label>
+                    <label><input type="radio" name="message-participant-filter" checked={messageParticipantFilter === "pending"} onChange={() => setMessageParticipantFilter("pending")} disabled={!isAdmin} /> Pendentes</label>
+                  </fieldset>
                 </div>
                 <div className="message-preview" aria-label="Prévia da lista automática">
                   <div className="message-preview__top"><span>Lista automática</span>{activeGroups.length > 0 && <select value={previewGroup?.id ?? ""} onChange={(event) => setPreviewGroupId(event.target.value)} aria-label="Grupo usado na prévia">{activeGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select>}</div>
                   <div className="locked-list" aria-readonly="true">
                     <p>{previewGroup ? interpolateMessage(messageIntro || DEFAULT_MESSAGE_INTRO, previewGroup, competence) : "Crie um grupo para visualizar a mensagem."}</p>
                     <div className="locked-list__rows">
-                      {previewRows.length ? previewRows.map((charge) => <span key={charge.id}>{charge.status === "paid" ? "✅" : "🔴"} {charge.participantName ?? "Participante"} — {charge.status === "paid" ? "pago" : "pendente"}</span>) : <span className="locked-list__empty">A lista aparecerá após a geração das cobranças.</span>}
+                      {previewRows.length ? previewRows.map((charge) => <span key={charge.id}>{charge.status === "paid" ? "✅" : "🔴"} {charge.participantName ?? "Participante"} — {charge.status === "paid" ? "pago" : "pendente"}</span>) : <span className="locked-list__empty">{messageParticipantFilter === "paid" ? "Nenhum pagador ainda." : messageParticipantFilter === "pending" ? "Nenhuma pendência." : "A lista aparecerá após a geração das cobranças."}</span>}
                     </div>
                     {previewGroup && <><p>{interpolateMessage(messageOutro || DEFAULT_MESSAGE_OUTRO, previewGroup, competence)}</p><small>/g/{previewGroup.publicSlug}</small></>}
                   </div>

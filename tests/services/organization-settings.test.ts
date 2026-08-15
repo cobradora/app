@@ -26,6 +26,16 @@ describe("organization-settings service", () => {
     expect(settings.organizationId).toBe(organizationId);
     expect(settings.messageIntro).toBe("");
     expect(settings.messageOutro).toBe("");
+    expect(settings.messageParticipantFilter).toBe("all");
+  });
+
+  it("atualiza o filtro de participantes da mensagem isoladamente", async () => {
+    const settings = await updateOrganizationSettings(organizationId, {
+      messageParticipantFilter: "pending",
+    });
+
+    expect(settings.messageParticipantFilter).toBe("pending");
+    expect(settings.messageIntro).toBe("");
   });
 
   it("atualiza somente os campos enviados", async () => {
