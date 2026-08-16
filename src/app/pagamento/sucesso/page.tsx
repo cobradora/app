@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { Check, Clock3, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { Spinner } from "@/components/spinner";
 import cobradoraLogo from "@/images/logo-horizontal-sem-fundo.png";
 
 type ReturnDetails = {
@@ -97,7 +98,7 @@ export default function PagamentoSucessoPage() {
         {state.kind === "verifying" && (
           <>
             <div className="checkout-check" aria-hidden="true">
-              <Clock3 size={24} />
+              <Spinner size={24} />
             </div>
             <h1 id="payment-status-title">Confirmando com a InfinitePay</h1>
             <p className="checkout-sub">Aguarde alguns instantes. Não feche esta página durante a verificação.</p>

@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { Spinner } from "@/components/spinner";
 import cobraLogo from "@/images/logo-cobra-sem-fundo.png";
 
 function ResetPasswordForm() {
@@ -73,7 +74,7 @@ function ResetPasswordForm() {
       {error && <p className="form-error" role="alert">{error}</p>}
 
       <button type="submit" className="button button--primary button--full auth-submit" disabled={submitting || newPassword.trim().length < 8 || confirmPassword.trim().length < 8}>
-        {submitting ? "Salvando…" : <><span>Redefinir senha</span><ArrowRight size={18} /></>}
+        {submitting ? <><Spinner size={18} /><span>Salvando…</span></> : <><span>Redefinir senha</span><ArrowRight size={18} /></>}
       </button>
     </form>
   );

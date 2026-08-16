@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "next/navigation";
 import { apiClient } from "@/lib/api-client";
 import { parsePhoneBR, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
+import { Spinner } from "@/components/spinner";
 import cobradoraLogo from "@/images/logo-horizontal-sem-fundo.png";
 
 const MONTH_NAMES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -170,8 +171,8 @@ export default function PublicGroupPage() {
         </div>
 
         {group.kind === "loading" && (
-          <p className="checkout-sub" role="status" aria-live="polite" style={{ marginTop: 20 }}>
-            Carregando o grupo…
+          <p className="checkout-sub" role="status" aria-live="polite" style={{ marginTop: 20, display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+            <Spinner /> Carregando o grupo…
           </p>
         )}
 
@@ -225,7 +226,7 @@ export default function PublicGroupPage() {
                     className="solid full"
                     disabled={loadingCharges || !isValidPhone(phone)}
                   >
-                    {loadingCharges ? "Consultando…" : "Ver cobranças"}
+                    {loadingCharges ? <><Spinner /> Consultando…</> : "Ver cobranças"}
                   </button>
                 </form>
               </>
@@ -300,7 +301,7 @@ export default function PublicGroupPage() {
                   disabled={selectedCharges.length === 0 || submitting}
                   onClick={handleCheckout}
                 >
-                  {submitting ? "Preparando checkout…" : `Pagar ${formatBRL(totalSelected)}`}
+                  {submitting ? <><Spinner /> Preparando checkout…</> : `Pagar ${formatBRL(totalSelected)}`}
                 </button>
 
                 <p className="checkout-hint">

@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { ArrowRight, Mail } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { Spinner } from "@/components/spinner";
 import cobraLogo from "@/images/logo-cobra-sem-fundo.png";
 
 export default function ForgotPasswordPage() {
@@ -66,7 +67,7 @@ export default function ForgotPasswordPage() {
             {error && <p className="form-error" role="alert">{error}</p>}
 
             <button type="submit" className="button button--primary button--full auth-submit" disabled={submitting || !email.trim()}>
-              {submitting ? "Enviando…" : <><span>Enviar link</span><ArrowRight size={18} /></>}
+              {submitting ? <><Spinner size={18} /><span>Enviando…</span></> : <><span>Enviar link</span><ArrowRight size={18} /></>}
             </button>
           </form>
         )}

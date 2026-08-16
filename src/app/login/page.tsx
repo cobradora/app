@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { ArrowRight, CheckCircle2 } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
+import { Spinner } from "@/components/spinner";
 import cobraLogo from "@/images/logo-cobra-sem-fundo.png";
 
 export default function LoginPage() {
@@ -82,7 +83,7 @@ export default function LoginPage() {
           {error && <p className="form-error" role="alert">{error}</p>}
 
           <button type="submit" className="button button--primary button--full auth-submit" disabled={submitting || !email.trim() || !password.trim()}>
-            {submitting ? "Entrando…" : <><span>Entrar</span><ArrowRight size={18} /></>}
+            {submitting ? <><Spinner size={18} /><span>Entrando…</span></> : <><span>Entrar</span><ArrowRight size={18} /></>}
           </button>
         </form>
 

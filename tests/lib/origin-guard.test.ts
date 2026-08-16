@@ -19,6 +19,17 @@ describe("origin-guard", () => {
     expect(assertTrustedOrigin(request)).toBe(true);
   });
 
+  it("em produção, aceita Origin com www quando APP_BASE_URL não tem www (e vice-versa)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("APP_BASE_URL", "https://cobradora.com.br");
+    const withWww = new Request("http://localhost/x", { headers: { origin: "https://www.cobradora.com.br" } });
+    expect(assertTrustedOrigin(withWww)).toBe(true);
+
+    vi.stubEnv("APP_BASE_URL", "https://www.cobradora.com.br");
+    const withoutWww = new Request("http://localhost/x", { headers: { origin: "https://cobradora.com.br" } });
+    expect(assertTrustedOrigin(withoutWww)).toBe(true);
+  });
+
   it("em produção, rejeita Origin diferente do APP_BASE_URL", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("APP_BASE_URL", "https://cobradora.com.br");
