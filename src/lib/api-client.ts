@@ -4,6 +4,17 @@
 
 type ApiErrorBody = { error?: string; issues?: { message: string }[]; message?: string };
 
+/** Preserva o código de erro do backend (ex.: "checkout_reconciliation_required") — `.message` sozinho não basta quando a UI precisa decidir uma ação, não só exibir texto. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 /**
  * Le o corpo da resposta com seguranca: um 500 sem corpo (comum quando o
  * servidor cai antes de montar um JSON de erro, ex. falha de conexao com o
@@ -32,7 +43,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const errorBody = data as ApiErrorBody;
     const message = errorBody.issues?.[0]?.message ?? errorBody.message ?? errorBody.error ?? "Erro desconhecido";
-    throw new Error(message);
+    throw new ApiError(message, errorBody.error);
   }
 
   return data as T;
@@ -93,6 +104,7 @@ export type CheckoutResult = {
   totalChargesAmount: number;
   payerName: string;
   resumed: boolean;
+  recovered?: "resumed_previous" | "started_new";
 };
 
 export type CheckoutPaymentStatus = {
@@ -374,10 +386,16 @@ export const apiClient = {
    * gateway e InfinitePay e o servico devolve
    * `{ checkout: { checkoutSessionId, checkoutUrl, totalChargesAmount } }`.
    */
-  async createCheckout(groupPublicSlug: string, phone: string, chargeIds: string[], idempotencyKey: string) {
+  async createCheckout(
+    groupPublicSlug: string,
+    phone: string,
+    chargeIds: string[],
+    idempotencyKey: string,
+    resetBlocked?: boolean,
+  ) {
     const data = await request<{ checkout: CheckoutResult }>(`/api/public/groups/${groupPublicSlug}/checkout`, {
       method: "POST",
-      body: JSON.stringify({ phone, chargeIds, idempotencyKey }),
+      body: JSON.stringify({ phone, chargeIds, idempotencyKey, ...(resetBlocked && { resetBlocked }) }),
     });
     return data.checkout;
   },

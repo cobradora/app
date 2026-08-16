@@ -237,6 +237,67 @@ describe("checkout service (InfinitePay, sem split)", () => {
     expect((getPaymentsAdapter() as unknown as { createCheckout: Mock }).createCheckout).toHaveBeenCalledTimes(1);
   });
 
+  it("resetBlocked reaproveita o link ja conhecido de uma sessao expirada, sem criar sessao nova", async () => {
+    const [pendingCharge] = await db.select().from(charges);
+    const first = await createCheckoutForCharges(groupPublicSlug, phone, [pendingCharge.id], "idem-reset-link-conhecido");
+    await db
+      .update(checkoutSessions)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(checkoutSessions.id, first.checkoutSessionId));
+    await expireStaleCheckoutSessions();
+
+    const result = await createCheckoutForCharges(
+      groupPublicSlug,
+      phone,
+      [pendingCharge.id],
+      "idem-reset-link-conhecido-nova-chave",
+      true,
+    );
+
+    expect(result.checkoutSessionId).toBe(first.checkoutSessionId);
+    expect(result.checkoutUrl).toBe(first.checkoutUrl);
+    expect(result.recovered).toBe("resumed_previous");
+    expect((getPaymentsAdapter() as unknown as { createCheckout: Mock }).createCheckout).toHaveBeenCalledTimes(1);
+
+    const [session] = await db.select().from(checkoutSessions).where(eq(checkoutSessions.id, first.checkoutSessionId));
+    const [charge] = await db.select().from(charges).where(eq(charges.id, pendingCharge.id));
+    expect(session.status).toBe("pending");
+    expect(charge.status).toBe("checkout_pending");
+  });
+
+  it("resetBlocked cancela a sessao ambigua sem link e cria uma sessao nova de verdade", async () => {
+    const [chargeBefore] = await db.select().from(charges);
+    (getPaymentsAdapter() as unknown as { createCheckout: Mock }).createCheckout.mockRejectedValueOnce(
+      new InfinitePayCheckoutRequestError("timeout", true),
+    );
+    await expect(
+      createCheckoutForCharges(groupPublicSlug, phone, [chargeBefore.id], "idem-reset-ambigua"),
+    ).rejects.toThrow(/Não foi possível preparar/);
+
+    const [blockedSession] = await db
+      .select()
+      .from(checkoutSessions)
+      .where(eq(checkoutSessions.idempotencyKey, "idem-reset-ambigua"));
+    expect(blockedSession.externalCreationState).toBe("ambiguous");
+
+    const result = await createCheckoutForCharges(
+      groupPublicSlug,
+      phone,
+      [chargeBefore.id],
+      "idem-reset-ambigua-nova-chave",
+      true,
+    );
+
+    expect(result.checkoutSessionId).not.toBe(blockedSession.id);
+    expect(result.recovered).toBe("started_new");
+    expect((getPaymentsAdapter() as unknown as { createCheckout: Mock }).createCheckout).toHaveBeenCalledTimes(2);
+
+    const [oldSession] = await db.select().from(checkoutSessions).where(eq(checkoutSessions.id, blockedSession.id));
+    const [charge] = await db.select().from(charges).where(eq(charges.id, chargeBefore.id));
+    expect(oldSession.status).toBe("canceled");
+    expect(charge.status).toBe("checkout_pending");
+  });
+
   it("grava webhookTokenHash (SHA-256 hex) na sessao criada", async () => {
     const pendingCharges = await db.select().from(charges);
     const result = await createCheckoutForCharges(

@@ -15,6 +15,7 @@ const checkoutInput = z
       .max(50)
       .refine((ids) => new Set(ids).size === ids.length, { message: "chargeIds não pode conter duplicatas" }),
     idempotencyKey: z.string().min(10).max(100).regex(/^[A-Za-z0-9._:-]+$/),
+    resetBlocked: z.boolean().optional(),
   })
   .strict();
 
@@ -40,8 +41,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const { publicSlug } = await params;
-    const { phone, chargeIds, idempotencyKey } = checkoutInput.parse(JSON.parse(rawBody));
-    const checkout = await createCheckoutForCharges(publicSlug, phone, chargeIds, idempotencyKey);
+    const { phone, chargeIds, idempotencyKey, resetBlocked } = checkoutInput.parse(JSON.parse(rawBody));
+    const checkout = await createCheckoutForCharges(publicSlug, phone, chargeIds, idempotencyKey, resetBlocked);
     return noStoreJson({ checkout }, 201);
   } catch (error) {
     if (error instanceof SyntaxError) return noStoreJson({ error: "invalid_json" }, 400);

@@ -16,7 +16,7 @@ import { InfinitePayCheckoutRequestError } from "@/payments/infinitepay-adapter"
 import { deriveCheckoutToken, hashCheckoutToken } from "@/payments/session-tokens";
 import { normalizePhoneBR } from "@/lib/phone";
 
-const SESSION_TTL_MS = 30 * 60 * 1000;
+const SESSION_TTL_MS = 15 * 60 * 1000;
 const CREATION_IN_FLIGHT_MS = 20_000;
 
 export type PublicCheckoutErrorCode =
@@ -398,6 +398,107 @@ async function cancelSessionAndReleaseCharges(sessionId: string): Promise<void> 
   });
 }
 
+/**
+ * Reabre localmente uma sessão que expirou por TTL mas cujo link é
+ * confirmadamente real (checkoutUrl != null) — não há ambiguidade nenhuma
+ * aqui, só a nossa janela de reserva local que passou. Renova o TTL e volta
+ * pro estado "pending"/"linked" em vez de criar uma sessão concorrente.
+ */
+async function resumeKnownLinkSession(sessionId: string): Promise<Session | null> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select id from checkout_sessions where id = ${sessionId} for update`);
+    const [session] = await tx.select().from(checkoutSessions).where(eq(checkoutSessions.id, sessionId));
+    if (!session || !session.checkoutUrl || !["created", "pending", "expired"].includes(session.status)) return null;
+
+    const items = await tx.select().from(checkoutItems).where(eq(checkoutItems.checkoutSessionId, sessionId));
+    if (items.length > 0) {
+      const itemChargeIds = items.map((item) => item.chargeId);
+      const currentCharges = await tx
+        .select({ id: charges.id, status: charges.status })
+        .from(charges)
+        .where(inArray(charges.id, itemChargeIds));
+      // Se alguma cobrança já mudou de estado por fora (baixa manual,
+      // cancelamento) desde que a sessão expirou, não reaproveita — a
+      // reconciliação segue bloqueada e o participante cai no fluxo normal.
+      if (
+        currentCharges.length !== items.length ||
+        currentCharges.some((charge) => charge.status !== "open" && charge.status !== "checkout_pending")
+      ) {
+        return null;
+      }
+      await tx
+        .update(charges)
+        .set({ status: "checkout_pending", updatedAt: new Date() })
+        .where(and(inArray(charges.id, itemChargeIds), eq(charges.status, "open")));
+    }
+
+    const [resumed] = await tx
+      .update(checkoutSessions)
+      .set({ status: "pending", externalCreationState: "linked", expiresAt: new Date(Date.now() + SESSION_TTL_MS) })
+      .where(eq(checkoutSessions.id, sessionId))
+      .returning();
+    return resumed ?? null;
+  });
+}
+
+/**
+ * Só usada pelo fluxo explícito de "gerar novo link" do participante: cancela
+ * uma sessão travada em reconciliação (ambiguous/in_flight/linked) SEM
+ * checkoutUrl conhecido e libera as cobranças. Ao contrário de
+ * `cancelSessionAndReleaseCharges` (automática, só em estados 100% seguros),
+ * aqui é uma decisão explícita do participante assumindo o pequeno risco de
+ * existir um link antigo que a InfinitePay tenha criado sem nossa confirmação.
+ */
+async function cancelBlockedSessionAndReleaseCharges(sessionId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select id from checkout_sessions where id = ${sessionId} for update`);
+    const [session] = await tx.select().from(checkoutSessions).where(eq(checkoutSessions.id, sessionId));
+    if (!session || session.checkoutUrl || !["created", "pending", "expired"].includes(session.status)) return;
+
+    const items = await tx.select().from(checkoutItems).where(eq(checkoutItems.checkoutSessionId, sessionId));
+    await tx.update(checkoutSessions).set({ status: "canceled" }).where(eq(checkoutSessions.id, sessionId));
+
+    if (items.length > 0) {
+      await tx
+        .update(charges)
+        .set({ status: "open", updatedAt: new Date() })
+        .where(and(inArray(charges.id, items.map((item) => item.chargeId)), eq(charges.status, "checkout_pending")));
+    }
+  });
+}
+
+/**
+ * Ponto de entrada do botão "gerar novo link de pagamento": resolve uma
+ * sessão bloqueadora automaticamente quando é seguro (link conhecido →
+ * reaproveita, sem criar nada novo) e só assume risco (cancela e libera as
+ * cobranças pra uma sessão nova ser criada) quando genuinamente não há como
+ * saber o que aconteceu com a tentativa anterior. Ignora sessões que não
+ * estão de fato travadas (uma reserva ativa normal de outra aba, por
+ * exemplo) — essas continuam bloqueando checkout_in_progress como hoje.
+ */
+async function tryResolveBlockedSession(
+  organizationId: string,
+  chargeIds: string[],
+  payerName: string,
+): Promise<{ resumed: ReturnType<typeof checkoutResult> | null; reset: boolean }> {
+  const blocking = await findOverlappingBlockingSession(organizationId, chargeIds);
+  if (!blocking || (!requiresReconciliation(blocking) && blocking.status !== "expired")) {
+    return { resumed: null, reset: false };
+  }
+
+  if (blocking.checkoutUrl) {
+    const resumedSession = await resumeKnownLinkSession(blocking.id);
+    if (!resumedSession) return { resumed: null, reset: false };
+    return {
+      resumed: checkoutResult(resumedSession, await loadSessionItems(resumedSession.id), payerName, true),
+      reset: false,
+    };
+  }
+
+  await cancelBlockedSessionAndReleaseCharges(blocking.id);
+  return { resumed: null, reset: true };
+}
+
 async function reviveCanceledSession(
   session: Session,
   selectedCharges: SelectedCharge[],
@@ -712,6 +813,7 @@ export async function createCheckoutForCharges(
   rawPhone: string,
   chargeIds: string[],
   idempotencyKey: string,
+  resetBlocked = false,
 ) {
   const uniqueChargeIds = stableChargeIds(chargeIds);
   if (uniqueChargeIds.length === 0 || uniqueChargeIds.length !== chargeIds.length) {
@@ -762,6 +864,13 @@ export async function createCheckoutForCharges(
     );
   if (!gatewayAccount) {
     throw new PublicCheckoutError("gateway_not_configured", "Pagamento online indisponível para esta organização", 409);
+  }
+
+  let resetHappened = false;
+  if (resetBlocked) {
+    const resolution = await tryResolveBlockedSession(group.organizationId, uniqueChargeIds, responsible.name);
+    if (resolution.resumed) return { ...resolution.resumed, recovered: "resumed_previous" as const };
+    resetHappened = resolution.reset;
   }
 
   const selectedCharges = await db
@@ -909,5 +1018,6 @@ export async function createCheckoutForCharges(
     totalChargesAmount,
     payerName: responsible.name,
     resumed,
+    ...(resetHappened && { recovered: "started_new" as const }),
   };
 }

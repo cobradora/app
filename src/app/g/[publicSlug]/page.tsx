@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "next/navigation";
-import { apiClient } from "@/lib/api-client";
+import { apiClient, ApiError } from "@/lib/api-client";
 import { parsePhoneBR, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 import { Spinner } from "@/components/spinner";
 import cobradoraLogo from "@/images/logo-horizontal-sem-fundo.png";
@@ -82,6 +82,8 @@ export default function PublicGroupPage() {
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [checkoutBlocked, setCheckoutBlocked] = useState(false);
+  const [recoveredCheckoutUrl, setRecoveredCheckoutUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -129,6 +131,8 @@ export default function PublicGroupPage() {
     });
     setIdempotencyKey(null);
     setCheckoutError(null);
+    setCheckoutBlocked(false);
+    setRecoveredCheckoutUrl(null);
   }
 
   function handleChangePhone() {
@@ -137,17 +141,23 @@ export default function PublicGroupPage() {
     setChargesError(null);
     setCheckoutError(null);
     setIdempotencyKey(null);
+    setCheckoutBlocked(false);
+    setRecoveredCheckoutUrl(null);
   }
 
   const selectedCharges = (charges ?? []).filter((charge) => selected.has(charge.chargeId));
   const totalSelected = selectedCharges.reduce((sum, charge) => sum + charge.totalAmount, 0);
   const payerName = charges?.[0]?.payerName;
 
-  async function handleCheckout() {
+  async function handleCheckout(resetBlocked = false) {
     if (selectedCharges.length === 0) return;
     setSubmitting(true);
     setCheckoutError(null);
-    const key = idempotencyKey ?? crypto.randomUUID();
+    setCheckoutBlocked(false);
+    setRecoveredCheckoutUrl(null);
+    // Um reset precisa de uma chave nova: reaproveitar a mesma faria o
+    // backend achar a sessão travada de novo pela idempotencyKey.
+    const key = resetBlocked ? crypto.randomUUID() : (idempotencyKey ?? crypto.randomUUID());
     setIdempotencyKey(key);
     try {
       const result = await apiClient.createCheckout(
@@ -155,9 +165,18 @@ export default function PublicGroupPage() {
         phone,
         selectedCharges.map((charge) => charge.chargeId),
         key,
+        resetBlocked,
       );
-      window.location.assign(result.checkoutUrl);
+      if (result.recovered === "started_new") {
+        setRecoveredCheckoutUrl(result.checkoutUrl);
+        setSubmitting(false);
+      } else {
+        window.location.assign(result.checkoutUrl);
+      }
     } catch (error) {
+      if (error instanceof ApiError && error.code === "checkout_reconciliation_required") {
+        setCheckoutBlocked(true);
+      }
       setCheckoutError((error as Error).message || "Não foi possível abrir o checkout");
       setSubmitting(false);
     }
@@ -295,14 +314,36 @@ export default function PublicGroupPage() {
                   </p>
                 )}
 
-                <button
-                  type="button"
-                  className="solid full"
-                  disabled={selectedCharges.length === 0 || submitting}
-                  onClick={handleCheckout}
-                >
-                  {submitting ? <><Spinner /> Preparando checkout…</> : `Pagar ${formatBRL(totalSelected)}`}
-                </button>
+                {recoveredCheckoutUrl ? (
+                  <>
+                    <p className="checkout-sub" role="status">
+                      Se você já pagou por uma tentativa anterior deste mesmo grupo, fale com o organizador antes de pagar de novo.
+                    </p>
+                    <button type="button" className="solid full" onClick={() => window.location.assign(recoveredCheckoutUrl)}>
+                      Continuar para pagamento
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="solid full"
+                    disabled={selectedCharges.length === 0 || submitting}
+                    onClick={() => handleCheckout()}
+                  >
+                    {submitting ? <><Spinner /> Preparando checkout…</> : `Pagar ${formatBRL(totalSelected)}`}
+                  </button>
+                )}
+
+                {checkoutBlocked && !recoveredCheckoutUrl && (
+                  <button
+                    type="button"
+                    className="solid full"
+                    disabled={submitting}
+                    onClick={() => handleCheckout(true)}
+                  >
+                    {submitting ? <><Spinner /> Gerando…</> : "Gerar novo link de pagamento"}
+                  </button>
+                )}
 
                 <p className="checkout-hint">
                   O pagamento só será baixado após a confirmação segura da InfinitePay.
