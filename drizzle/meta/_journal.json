@@ -57,6 +57,13 @@
       "when": 1786762971601,
       "tag": "0007_nappy_red_shift",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786868457086,
+      "tag": "0008_normal_lizard",
+      "breakpoints": true
     }
   ]
 }

@@ -375,3 +375,15 @@ export const auditEvents = pgTable("audit_events", {
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ---------- rate_limit_hits ----------
+// Contador de janela fixa para limitar abuso nas rotas públicas sem sessão
+// (src/lib/rate-limit.ts). Linhas antigas são varridas pelo cron diário
+// (src/app/api/cron/renewals/route.ts) — não precisa de índice de expiração.
+export const rateLimitHits = pgTable("rate_limit_hits", {
+  key: varchar("key", { length: 200 }).notNull(),
+  windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+  count: integer("count").notNull().default(1),
+}, (table) => ({
+  pk: unique("rate_limit_hits_pk").on(table.key, table.windowStart),
+}));

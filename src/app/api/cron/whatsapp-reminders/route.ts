@@ -1,10 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { generateDueBillingPeriods } from "@/services/billing";
-import { expireStaleCheckoutSessions } from "@/services/checkout";
-import { db } from "@/db";
-import { rateLimitHits } from "@/db/schema";
-import { lt } from "drizzle-orm";
+import { sendDailyPaymentReminders } from "@/services/whatsapp-reminders";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +20,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const checkoutExpiration = await expireStaleCheckoutSessions();
-  const summary = await generateDueBillingPeriods();
-  await db.delete(rateLimitHits).where(lt(rateLimitHits.windowStart, new Date(Date.now() - 24 * 60 * 60 * 1000)));
-  return NextResponse.json({ ok: summary.failures.length === 0, checkoutExpiration, ...summary });
+  const summary = await sendDailyPaymentReminders();
+  return NextResponse.json({ ok: summary.failures.length === 0, ...summary });
 }

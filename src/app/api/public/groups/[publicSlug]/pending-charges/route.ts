@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listPendingChargesByPhone } from "@/services/pending-charges";
+import { assertTrustedOrigin } from "@/lib/origin-guard";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { z } from "zod";
 
 const MAX_BODY_BYTES = 512;
+// Mais restritivo que as outras rotas públicas: recebe telefone e devolve
+// se há cobrança pendente — sem limite, dá pra enumerar números cadastrados.
+const RATE_LIMIT_PER_MINUTE = 10;
 const lookupInput = z.object({ phone: z.string().min(10).max(20) }).strict();
 
 function noStoreJson(body: unknown, status = 200) {
@@ -13,6 +18,13 @@ function noStoreJson(body: unknown, status = 200) {
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ publicSlug: string }> }) {
+  if (!assertTrustedOrigin(request)) {
+    return noStoreJson({ error: "forbidden" }, 403);
+  }
+  if (!(await checkRateLimit(`pending-charges:${getClientIp(request)}`, RATE_LIMIT_PER_MINUTE, 60))) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429, headers: { "Retry-After": "60", "Cache-Control": "private, no-store, max-age=0" } });
+  }
+
   const rawBody = await request.text();
   if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
     return noStoreJson({ error: "request_too_large" }, 413);

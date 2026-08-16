@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { sql } from "drizzle-orm";
 
 const TABLES = [
+  "rate_limit_hits",
   "audit_events",
   "webhook_events",
   "commissions",

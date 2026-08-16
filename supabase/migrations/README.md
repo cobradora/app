@@ -2,7 +2,7 @@
 
 Cópia exata das migrations geradas pelo Drizzle em `../../drizzle/`. Fonte da verdade do schema continua sendo [`src/db/schema.ts`](../../src/db/schema.ts) — sempre que ele mudar, gere a migration nova com `npm run db:generate` e copie o arquivo novo para cá também.
 
-> **A sequência completa `0000` → `0007` serve somente para inicializar um schema `public` vazio.** Em um banco já usado, parcialmente migrado ou que já tenha qualquer objeto da aplicação, nunca reinicie pela `0000`; primeiro inspecione o catálogo conforme o fluxo de diagnóstico abaixo.
+> **A sequência completa `0000` → `0008` serve somente para inicializar um schema `public` vazio.** Em um banco já usado, parcialmente migrado ou que já tenha qualquer objeto da aplicação, nunca reinicie pela `0000`; primeiro inspecione o catálogo conforme o fluxo de diagnóstico abaixo.
 
 Como o `drizzle-kit migrate` não conseguiu se conectar diretamente a este projeto Supabase (rede/conta), aplique os arquivos abaixo manualmente no **SQL Editor** do Supabase (Dashboard → SQL Editor → New query), **nesta ordem, um de cada vez**:
 
@@ -14,6 +14,7 @@ Como o `drizzle-kit migrate` não conseguiu se conectar diretamente a este proje
 6. `0005_cloudy_gamma_corps.sql` — adiciona o valor individual de cobrança por participante em cada grupo.
 7. `0006_awesome_bullseye.sql` — adiciona `organization_settings.message_participant_filter` (todos/pagadores/pendentes na mensagem de cobrança).
 8. `0007_nappy_red_shift.sql` — torna `groups.billing_day` opcional (renovação manual), move a mensagem de cobrança para `groups` (`message_intro`/`message_outro`/`message_participant_filter`, substituindo `organization_settings`, que fica sem uso mas não é apagada) e cria `group_tags` + `group_participants.tag` para a categoria/ordenação de participantes.
+9. `0008_normal_lizard.sql` — cria `rate_limit_hits` (contador de janela fixa para limitar abuso nas rotas públicas). Linhas antigas são varridas pelo cron diário (`/api/cron/renewals`), não precisa de manutenção manual.
 
 Depois de rodar as migrations, confira também `financial_contacts` e `organization_settings`. A `0004` interrompe de propósito se encontrar telefone legado inválido, nome normalizado duplicado no mesmo grupo, gateway duplicado ou dupla alocação; corrija os dados reportados antes de tentar novamente.
 
