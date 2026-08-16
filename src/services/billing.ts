@@ -14,6 +14,7 @@ export async function generateBillingPeriod(
   organizationId: string,
   groupId: string,
   referenceMonth: string,
+  options?: { dueDate?: string },
 ) {
   if (!isReferenceMonth(referenceMonth)) throw new Error("Mês de referência inválido");
 
@@ -29,13 +30,16 @@ export async function generateBillingPeriod(
     );
   if (!group) throw new Error("Grupo não encontrado");
 
+  const dueDate = options?.dueDate ?? (group.billingDay !== null ? renewalDateFor(referenceMonth, group.billingDay) : null);
+  if (!dueDate) throw new Error("Grupo sem dia de renovação configurado e sem data informada");
+
   return db.transaction(async (tx) => {
     const [period] = await tx
       .insert(billingPeriods)
       .values({
         groupId,
         referenceMonth,
-        dueDate: renewalDateFor(referenceMonth, group.billingDay),
+        dueDate,
       })
       .onConflictDoNothing({ target: [billingPeriods.groupId, billingPeriods.referenceMonth] })
       .returning();
@@ -146,6 +150,7 @@ export async function generateDueBillingPeriods(
   const failures: BillingCronFailure[] = [];
 
   for (const group of activeGroups) {
+    if (group.billingDay === null) continue; // renovação manual — sem cron para este grupo
     let attemptedReferenceMonth: string | null = null;
     try {
       const [latest] = await db
@@ -183,4 +188,41 @@ export async function generateDueBillingPeriods(
     generated,
     failures,
   };
+}
+
+export class GroupCycleNotManualError extends Error {
+  constructor() {
+    super("Este grupo já tem um dia de renovação configurado; use o ciclo automático");
+    this.name = "GroupCycleNotManualError";
+  }
+}
+
+function todayInBillingTimeZone(now: Date): string {
+  const local = getBillingLocalDateParts(now);
+  return `${local.year}-${String(local.month).padStart(2, "0")}-${String(local.day).padStart(2, "0")}`;
+}
+
+/**
+ * Gera o ciclo do mês corrente sob demanda para um grupo em modo de
+ * renovação manual (billingDay nulo). Grupos com ciclo automático precisam
+ * usar o Cron — essa função recusa para não duplicar/confundir o dia de
+ * vencimento configurado.
+ */
+export async function renewGroupCycleManually(organizationId: string, groupId: string, now = new Date()) {
+  const [group] = await db
+    .select()
+    .from(groups)
+    .where(
+      and(
+        eq(groups.id, groupId),
+        eq(groups.organizationId, organizationId),
+        eq(groups.status, "active"),
+      ),
+    );
+  if (!group) return null;
+  if (group.billingDay !== null) throw new GroupCycleNotManualError();
+
+  const referenceMonth = currentReferenceMonth(now);
+  const dueDate = todayInBillingTimeZone(now);
+  return generateBillingPeriod(organizationId, groupId, referenceMonth, { dueDate });
 }

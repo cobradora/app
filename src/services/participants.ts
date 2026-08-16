@@ -3,6 +3,7 @@ import {
   participants,
   financialContacts,
   groupParticipants,
+  groupTags,
   billingPeriods,
   groups,
   checkoutSessions,
@@ -17,7 +18,7 @@ import {
   normalizeHumanName,
   PARTICIPANT_NAME_MAX_LENGTH,
 } from "@/lib/normalization";
-import { billingStartFor, currentReferenceMonth } from "@/lib/billing-cycle";
+import { billingStartFor, currentReferenceMonth, getBillingLocalDateParts } from "@/lib/billing-cycle";
 import { hasOutstandingCharges } from "@/services/groups";
 
 type TransactionClient = Pick<typeof db, "select" | "insert" | "update" | "execute">;
@@ -70,17 +71,34 @@ const participantBillingAmount = z
   .min(1, "O valor da cobrança deve ser maior que zero")
   .max(MAX_PARTICIPANT_BILLING_AMOUNT, "O valor da cobrança excede o limite permitido");
 
+const participantTag = z
+  .string()
+  .max(60)
+  .transform((value) => value.trim());
+
 export const addParticipantInput = participantFields.extend({
   billingAmount: participantBillingAmount.optional(),
+  tag: participantTag.optional(),
 });
 export const updateParticipantInput = participantFields;
 export const updateGroupParticipantBillingInput = z.object({
   billingAmount: participantBillingAmount,
 });
+export const updateGroupParticipantTagInput = z.object({
+  tag: participantTag.nullable(),
+});
+export const updateGroupParticipantInput = z
+  .object({
+    billingAmount: participantBillingAmount.optional(),
+    tag: participantTag.nullable().optional(),
+  })
+  .refine((input) => input.billingAmount !== undefined || input.tag !== undefined, "Informe ao menos um campo");
 
 export type AddParticipantInput = z.infer<typeof addParticipantInput>;
 export type UpdateParticipantInput = z.infer<typeof updateParticipantInput>;
 export type UpdateGroupParticipantBillingInput = z.infer<typeof updateGroupParticipantBillingInput>;
+export type UpdateGroupParticipantTagInput = z.infer<typeof updateGroupParticipantTagInput>;
+export type UpdateGroupParticipantInput = z.infer<typeof updateGroupParticipantInput>;
 
 export class ParticipantBillingCheckoutPendingError extends Error {
   constructor() {
@@ -161,6 +179,15 @@ async function groupAndBillingStart(
     )
     .limit(1);
 
+  // Grupo em modo manual (sem billingDay): não há corte de dia do mês pra
+  // decidir "ciclo atual vs próximo" — o participante já entra elegível a
+  // partir de hoje, e só é cobrado de fato quando o admin renovar manualmente.
+  if (group.billingDay === null) {
+    const local = getBillingLocalDateParts(now);
+    const billingStartsOn = `${local.year}-${String(local.month).padStart(2, "0")}-${String(local.day).padStart(2, "0")}`;
+    return { group, billingStartsOn, referenceMonth, startsNextCycle: false };
+  }
+
   return {
     group,
     ...billingStartFor(group.billingDay, now, Boolean(currentPeriod)),
@@ -188,7 +215,17 @@ async function assertNameAvailable(
   if (duplicate) throw new ParticipantNameConflictError();
 }
 
-/** Lista os participantes ativos de um grupo tenant-scoped. */
+/**
+ * Grava (se ainda não existir) o valor de tag no catálogo de ordenação do
+ * grupo — nunca atualizado depois de criado, então a ordem reflete a
+ * primeira vez que a tag foi usada, não a última.
+ */
+async function upsertGroupTag(tx: TransactionClient, groupId: string, tag: string | null | undefined) {
+  if (!tag) return;
+  await tx.insert(groupTags).values({ groupId, tag }).onConflictDoNothing({ target: [groupTags.groupId, groupTags.tag] });
+}
+
+/** Lista os participantes ativos de um grupo tenant-scoped, com a ordem de cadastro das tags. */
 export async function listGroupParticipants(organizationId: string, groupId: string) {
   const [group] = await db
     .select({ id: groups.id })
@@ -196,7 +233,7 @@ export async function listGroupParticipants(organizationId: string, groupId: str
     .where(and(eq(groups.id, groupId), eq(groups.organizationId, organizationId)));
   if (!group) return null;
 
-  return db
+  const rows = await db
     .select({
       participantId: participants.id,
       financialContactId: participants.financialContactId,
@@ -205,6 +242,7 @@ export async function listGroupParticipants(organizationId: string, groupId: str
       phoneDisplay: financialContacts.phoneDisplay,
       billingStartsOn: groupParticipants.billingStartsOn,
       billingAmount: groupParticipants.billingAmount,
+      tag: groupParticipants.tag,
     })
     .from(groupParticipants)
     .innerJoin(participants, eq(groupParticipants.participantId, participants.id))
@@ -217,6 +255,14 @@ export async function listGroupParticipants(organizationId: string, groupId: str
         eq(financialContacts.organizationId, organizationId),
       ),
     );
+
+  const tagOrderRows = await db
+    .select({ tag: groupTags.tag })
+    .from(groupTags)
+    .where(eq(groupTags.groupId, groupId))
+    .orderBy(asc(groupTags.createdAt));
+
+  return { participants: rows, tagOrder: tagOrderRows.map((row) => row.tag) };
 }
 
 /**
@@ -284,6 +330,7 @@ export async function addParticipantToGroup(
         })
         .returning();
 
+      const tag = input.tag || null;
       await tx.insert(groupParticipants).values({
         groupId,
         participantId: participant.id,
@@ -292,7 +339,9 @@ export async function addParticipantToGroup(
         billingStartsOn: cycle.billingStartsOn,
         participantNameNormalized: nameNormalized,
         status: "active",
+        tag,
       });
+      await upsertGroupTag(tx, groupId, tag);
 
       return {
         participant: {
@@ -453,6 +502,46 @@ export async function updateGroupParticipantBillingAmount(
 
     if (!updatedMembership) return null;
     return { participant: updatedMembership, updatedOpenCharges };
+  });
+}
+
+/**
+ * Atualiza a categoria (tag) do vínculo do participante com o grupo. Não
+ * mexe em cobrança nem exige lock — a tag só afeta ordenação/exibição.
+ */
+export async function updateGroupParticipantTag(
+  organizationId: string,
+  groupId: string,
+  participantId: string,
+  rawInput: UpdateGroupParticipantTagInput,
+) {
+  const input = updateGroupParticipantTagInput.parse(rawInput);
+  const tag = input.tag || null;
+
+  return db.transaction(async (tx) => {
+    const [ownedLink] = await tx
+      .select({ id: groupParticipants.id })
+      .from(groupParticipants)
+      .innerJoin(groups, eq(groupParticipants.groupId, groups.id))
+      .innerJoin(participants, eq(groupParticipants.participantId, participants.id))
+      .where(
+        and(
+          eq(groupParticipants.groupId, groupId),
+          eq(groupParticipants.participantId, participantId),
+          eq(groupParticipants.status, "active"),
+          eq(groups.organizationId, organizationId),
+          eq(participants.organizationId, organizationId),
+        ),
+      );
+    if (!ownedLink) return null;
+
+    await upsertGroupTag(tx, groupId, tag);
+    const [updated] = await tx
+      .update(groupParticipants)
+      .set({ tag })
+      .where(eq(groupParticipants.id, ownedLink.id))
+      .returning({ participantId: groupParticipants.participantId, tag: groupParticipants.tag });
+    return updated ?? null;
   });
 }
 

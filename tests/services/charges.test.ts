@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/db";
-import { organizations, groups, participants } from "@/db/schema";
+import { organizations, groups, participants, charges } from "@/db/schema";
 import { findOrCreateParticipantByPhone, linkParticipantToGroup } from "@/services/participants";
 import { generateBillingPeriod } from "@/services/billing";
-import { listGroupCharges, listOrganizationCharges } from "@/services/charges";
+import { listGroupCharges, listOrganizationCharges, cancelCharge } from "@/services/charges";
+import { randomUUID } from "node:crypto";
 import { truncateAll } from "../helpers/db";
 import { eq } from "drizzle-orm";
 
@@ -87,5 +88,30 @@ describe("charges service", () => {
     const rows = await listOrganizationCharges(organizationId, "2026-08");
 
     expect(rows).toEqual([]);
+  });
+
+  it("cancela uma cobranca em aberto", async () => {
+    const participant = await findOrCreateParticipantByPhone(organizationId, "(11) 98812-4410");
+    await linkParticipantToGroup(organizationId, groupId, participant.id, new Date("2026-08-01T12:00:00Z"));
+    await generateBillingPeriod(organizationId, groupId, "2026-08");
+    const [charge] = await db.select().from(charges).where(eq(charges.participantId, participant.id));
+
+    await cancelCharge(organizationId, randomUUID(), charge.id);
+
+    const [updated] = await db.select().from(charges).where(eq(charges.id, charge.id));
+    expect(updated.status).toBe("canceled");
+  });
+
+  it("nao cancela cobranca que ja nao esta mais aberta", async () => {
+    const participant = await findOrCreateParticipantByPhone(organizationId, "(11) 98812-4410");
+    await linkParticipantToGroup(organizationId, groupId, participant.id, new Date("2026-08-01T12:00:00Z"));
+    await generateBillingPeriod(organizationId, groupId, "2026-08");
+    const [charge] = await db.select().from(charges).where(eq(charges.participantId, participant.id));
+    await db.update(charges).set({ status: "paid" }).where(eq(charges.id, charge.id));
+
+    await expect(cancelCharge(organizationId, randomUUID(), charge.id)).rejects.toThrow();
+
+    const [unchanged] = await db.select().from(charges).where(eq(charges.id, charge.id));
+    expect(unchanged.status).toBe("paid");
   });
 });

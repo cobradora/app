@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { signUp } from "@/services/auth";
+import { signUp, changePassword, InvalidCurrentPasswordError } from "@/services/auth";
 import { verifyPassword } from "@/lib/password";
+import { db } from "@/db";
+import { users } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { truncateAll } from "../helpers/db";
 
 describe("auth service", () => {
@@ -43,5 +46,33 @@ describe("auth service", () => {
     });
 
     expect(second).toBeNull();
+  });
+
+  it("troca a senha quando a atual esta correta", async () => {
+    const signed = await signUp({
+      organizationName: "Arena Nova",
+      name: "Lucas Martins",
+      email: "lucas@arenanova.com.br",
+      password: "senha-forte-123",
+    });
+
+    await changePassword(signed!.user.id, { currentPassword: "senha-forte-123", newPassword: "nova-senha-456" });
+
+    const [updated] = await db.select().from(users).where(eq(users.id, signed!.user.id));
+    expect(await verifyPassword("nova-senha-456", updated.passwordHash!)).toBe(true);
+    expect(await verifyPassword("senha-forte-123", updated.passwordHash!)).toBe(false);
+  });
+
+  it("rejeita troca de senha quando a senha atual esta errada", async () => {
+    const signed = await signUp({
+      organizationName: "Arena Nova",
+      name: "Lucas Martins",
+      email: "lucas@arenanova.com.br",
+      password: "senha-forte-123",
+    });
+
+    await expect(
+      changePassword(signed!.user.id, { currentPassword: "senha-errada", newPassword: "nova-senha-456" }),
+    ).rejects.toBeInstanceOf(InvalidCurrentPasswordError);
   });
 });

@@ -13,6 +13,7 @@ const TABLES = [
   "charges",
   "billing_periods",
   "group_participants",
+  "group_tags",
   "participants",
   "financial_contacts",
   "groups",

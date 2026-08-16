@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { db } from "@/db";
 import { organizations, groups, charges } from "@/db/schema";
 import { findOrCreateParticipantByPhone, linkParticipantToGroup } from "@/services/participants";
-import { generateBillingPeriod, generateDueBillingPeriods } from "@/services/billing";
+import { generateBillingPeriod, generateDueBillingPeriods, renewGroupCycleManually, GroupCycleNotManualError } from "@/services/billing";
 import { truncateAll } from "../helpers/db";
 import { eq } from "drizzle-orm";
 
@@ -78,5 +78,37 @@ describe("billing service", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+
+  it("renova o ciclo manualmente para grupo sem billingDay, usando a data de hoje como vencimento", async () => {
+    const [manualGroup] = await db
+      .insert(groups)
+      .values({ organizationId, name: "Manual", publicSlug: "manual-abcd", billingDay: null, defaultAmount: 5000 })
+      .returning();
+    const participant = await findOrCreateParticipantByPhone(organizationId, "(11) 98812-4410");
+    await linkParticipantToGroup(organizationId, manualGroup.id, participant.id, new Date("2026-08-01T12:00:00Z"));
+
+    const period = await renewGroupCycleManually(organizationId, manualGroup.id, new Date("2026-08-15T12:00:00-03:00"));
+
+    expect(period).not.toBeNull();
+    expect(period!.dueDate).toBe("2026-08-15");
+    const rows = await db.select().from(charges).where(eq(charges.billingPeriodId, period!.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  it("recusa renovação manual para grupo com billingDay configurado", async () => {
+    await expect(renewGroupCycleManually(organizationId, groupId, new Date())).rejects.toThrow(GroupCycleNotManualError);
+  });
+
+  it("generateDueBillingPeriods pula grupos em modo manual (billingDay nulo)", async () => {
+    const [manualGroup] = await db
+      .insert(groups)
+      .values({ organizationId, name: "Manual", publicSlug: "manual-xyz", billingDay: null, defaultAmount: 5000 })
+      .returning();
+
+    const result = await generateDueBillingPeriods(new Date("2026-08-10T12:00:00-03:00"), generateBillingPeriod);
+
+    expect(result.generated.some((item) => item.groupId === manualGroup.id)).toBe(false);
+    expect(result.failures.some((item) => item.groupId === manualGroup.id)).toBe(false);
   });
 });

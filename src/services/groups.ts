@@ -11,10 +11,14 @@ const groupName = z
   .transform(cleanHumanName)
   .refine((value) => value.length > 0, "Informe o nome do grupo");
 
+const MESSAGE_PART_MAX_LENGTH = 1000;
+const messagePart = z.string().max(MESSAGE_PART_MAX_LENGTH).transform((value) => value.trim());
+
 export const createGroupInput = z.object({
   name: groupName,
   sport: z.string().min(1).max(60).optional(),
-  billingDay: z.number().int().min(1).max(28),
+  // Vazio/ausente = renovação manual (sem cron automático para este grupo).
+  billingDay: z.number().int().min(1).max(28).nullable().optional(),
   defaultAmount: z.number().int().positive(),
 });
 
@@ -40,7 +44,7 @@ export async function createGroup(organizationId: string, rawInput: CreateGroupI
       organizationId,
       name: input.name,
       publicSlug: `${baseSlug}-${suffix}`,
-      billingDay: input.billingDay,
+      billingDay: input.billingDay ?? null,
       defaultAmount: input.defaultAmount,
     })
     .returning();
@@ -54,8 +58,13 @@ export async function listGroups(organizationId: string) {
 
 export const updateGroupInput = z.object({
   name: groupName.optional(),
-  billingDay: z.number().int().min(1).max(28).optional(),
+  // `null` limpa o dia (volta pra renovação manual); `undefined`/ausente
+  // deixa o valor atual intacto.
+  billingDay: z.number().int().min(1).max(28).nullable().optional(),
   defaultAmount: z.number().int().positive().optional(),
+  messageIntro: messagePart.optional(),
+  messageOutro: messagePart.optional(),
+  messageParticipantFilter: z.enum(["all", "paid", "pending"]).optional(),
 }).refine((input) => Object.values(input).some((value) => value !== undefined), "Informe ao menos um campo");
 
 export type UpdateGroupInput = z.infer<typeof updateGroupInput>;
@@ -66,6 +75,9 @@ export async function updateGroup(organizationId: string, groupId: string, rawIn
     ...(input.name !== undefined && { name: input.name }),
     ...(input.billingDay !== undefined && { billingDay: input.billingDay }),
     ...(input.defaultAmount !== undefined && { defaultAmount: input.defaultAmount }),
+    ...(input.messageIntro !== undefined && { messageIntro: input.messageIntro }),
+    ...(input.messageOutro !== undefined && { messageOutro: input.messageOutro }),
+    ...(input.messageParticipantFilter !== undefined && { messageParticipantFilter: input.messageParticipantFilter }),
   };
 
   const [group] = await db

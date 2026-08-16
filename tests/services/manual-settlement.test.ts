@@ -46,4 +46,20 @@ describe("manual settlement", () => {
     expect((audit.metadata as Record<string, unknown>).observation).toBe("Pago em espécie no dia do jogo");
     expect((audit.metadata as Record<string, unknown>).paymentMethod).toBe("dinheiro");
   });
+
+  it("aceita pix como forma de pagamento", async () => {
+    await registerManualSettlement(organizationId, userId, chargeId, { paymentMethod: "pix" });
+
+    const [updated] = await db.select().from(charges).where(eq(charges.id, chargeId));
+    expect(updated.status).toBe("manually_paid");
+  });
+
+  it("rejeita 'transferencia' (removida em favor de pix/outro)", async () => {
+    await expect(
+      registerManualSettlement(organizationId, userId, chargeId, {
+        // @ts-expect-error valor antigo, removido do enum
+        paymentMethod: "transferencia",
+      }),
+    ).rejects.toThrow();
+  });
 });

@@ -8,9 +8,13 @@ export type Group = {
   initials: string;
   color: string;
   amount: number;
-  dueDay: number;
+  /** Dia de renovação do ciclo; `null` = renovação manual (sem cron automático). */
+  dueDay: number | null;
   publicSlug: string;
   status: "active" | "archived";
+  messageIntro: string;
+  messageOutro: string;
+  messageParticipantFilter: "all" | "paid" | "pending";
 };
 
 export type Participant = {

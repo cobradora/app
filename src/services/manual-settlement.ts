@@ -12,7 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 export const manualSettlementInput = z.object({
-  paymentMethod: z.enum(["dinheiro", "transferencia", "outro"]),
+  paymentMethod: z.enum(["dinheiro", "pix", "outro"]),
   observation: z.string().max(500).optional(),
 });
 

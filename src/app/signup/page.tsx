@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Sparkles } from "lucide-react";
 import { apiClient } from "@/lib/api-client";
 import cobraLogo from "@/images/logo-cobra-sem-fundo.png";
 
@@ -14,11 +14,17 @@ export default function SignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (password !== confirmPassword) {
+      setError("A confirmação não bate com a senha.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -32,7 +38,7 @@ export default function SignupPage() {
   }
 
   const canSubmit =
-    organizationName.trim() && name.trim() && email.trim() && password.trim().length >= 8;
+    organizationName.trim() && name.trim() && email.trim() && password.trim().length >= 8 && confirmPassword.trim().length >= 8;
 
   return (
     <div className="auth-page auth-page--signup">
@@ -89,12 +95,30 @@ export default function SignupPage() {
           <div className="auth-input">
             <input
               id="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               autoComplete="new-password"
               maxLength={128}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="Mínimo de 8 caracteres"
+              required
+              minLength={8}
+            />
+            <button type="button" className="auth-input__toggle" onClick={() => setShowPassword((value) => !value)} aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}>
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
+
+          <label htmlFor="confirmPassword">Confirmar senha</label>
+          <div className="auth-input">
+            <input
+              id="confirmPassword"
+              type={showPassword ? "text" : "password"}
+              autoComplete="new-password"
+              maxLength={128}
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              placeholder="Repita a senha"
               required
               minLength={8}
             />
@@ -105,6 +129,14 @@ export default function SignupPage() {
           <button type="submit" className="button button--primary button--full auth-submit" disabled={submitting || !canSubmit}>
             {submitting ? "Criando…" : <><span>Criar conta</span><ArrowRight size={18} /></>}
           </button>
+
+          <p className="auth-consent">
+            Ao criar sua conta, você concorda com nossa{" "}
+            <Link className="link" href="/politica-de-privacidade" target="_blank" rel="noopener noreferrer">
+              Política de Privacidade
+            </Link>
+            .
+          </p>
         </form>
 
         <p className="auth-switch">

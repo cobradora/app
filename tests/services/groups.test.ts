@@ -65,6 +65,34 @@ describe("groups service", () => {
     expect(updated?.name).toBe("Nome novo");
   });
 
+  it("cria um grupo sem billingDay (renovacao manual)", async () => {
+    const group = await createGroup(organizationId, { name: "Grupo manual", defaultAmount: 8000 });
+
+    expect(group.billingDay).toBeNull();
+  });
+
+  it("limpa o billingDay explicitamente (volta para renovacao manual)", async () => {
+    const group = await createGroup(organizationId, { name: "Grupo com ciclo", billingDay: 10, defaultAmount: 8000 });
+
+    const updated = await updateGroup(organizationId, group.id, { billingDay: null });
+
+    expect(updated?.billingDay).toBeNull();
+  });
+
+  it("atualiza a mensagem de cobranca do grupo", async () => {
+    const group = await createGroup(organizationId, { name: "Grupo com mensagem", billingDay: 5, defaultAmount: 8000 });
+
+    const updated = await updateGroup(organizationId, group.id, {
+      messageIntro: "Oi, {grupo}!",
+      messageOutro: "Valeu!",
+      messageParticipantFilter: "pending",
+    });
+
+    expect(updated?.messageIntro).toBe("Oi, {grupo}!");
+    expect(updated?.messageOutro).toBe("Valeu!");
+    expect(updated?.messageParticipantFilter).toBe("pending");
+  });
+
   it("nao atualiza grupo de outra organizacao", async () => {
     const [otherOrg] = await db.insert(organizations).values({ name: "Outra Org" }).returning();
     const group = await createGroup(otherOrg.id, { name: "Grupo de outra org", billingDay: 5, defaultAmount: 8000 });

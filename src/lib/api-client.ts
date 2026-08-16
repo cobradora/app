@@ -53,12 +53,13 @@ export type SignupInput = {
 export type CreateGroupInput = {
   name: string;
   sport?: string;
-  billingDay: number;
+  /** Ausente/omitido = renovação manual (sem dia fixo de ciclo). */
+  billingDay?: number;
   defaultAmount: number;
 };
 
 export type ManualSettlementInput = {
-  paymentMethod: "dinheiro" | "transferencia" | "outro";
+  paymentMethod: "dinheiro" | "pix" | "outro";
   observation?: string;
 };
 
@@ -67,12 +68,18 @@ export type AddParticipantInput = {
   phone: string;
   /** Valor individual em centavos. Quando omitido, a API usa a sugestao do grupo. */
   billingAmount?: number;
+  /** Categoria livre (opcional), usada só para ordenar a mensagem de cobrança. */
+  tag?: string;
 };
 
 export type UpdateGroupInput = {
   name?: string;
-  billingDay?: number;
+  /** `null` limpa o dia (volta pra renovação manual); ausente mantém o valor atual. */
+  billingDay?: number | null;
   defaultAmount?: number;
+  messageIntro?: string;
+  messageOutro?: string;
+  messageParticipantFilter?: "all" | "paid" | "pending";
 };
 
 export type UpdateParticipantInput = {
@@ -103,12 +110,6 @@ export type AddParticipantResult = {
   };
   startsNextCycle: boolean;
   nextCycleReferenceMonth: string;
-};
-
-export type OrganizationSettings = {
-  messageIntro: string;
-  messageOutro: string;
-  messageParticipantFilter: "all" | "paid" | "pending";
 };
 
 export type PendingCharge = {
@@ -147,12 +148,21 @@ export type GroupParticipant = {
   phoneDisplay: string;
   /** Valor individual deste vinculo com o grupo, em centavos. */
   billingAmount: number;
+  /** Categoria livre deste vinculo com o grupo (null = sem tag). */
+  tag: string | null;
 };
 
-export type UpdateGroupParticipantBillingResult = {
+export type ListGroupParticipantsResult = {
+  participants: GroupParticipant[];
+  /** Tags do grupo na ordem em que foram cadastradas pela primeira vez. */
+  tagOrder: string[];
+};
+
+export type UpdateGroupParticipantResult = {
   participant: {
     participantId: string;
-    billingAmount: number;
+    billingAmount?: number;
+    tag?: string | null;
   };
   updatedOpenCharges: number;
 };
@@ -199,21 +209,6 @@ export const apiClient = {
     return data.account;
   },
 
-  /** GET /api/settings — partes editáveis da mensagem; a lista é sempre gerada pelo sistema. */
-  async getOrganizationSettings() {
-    const data = await request<{ settings: OrganizationSettings }>("/api/settings", { method: "GET" });
-    return data.settings;
-  },
-
-  /** PATCH /api/settings — persiste somente introdução/encerramento da mensagem. */
-  async updateOrganizationSettings(input: OrganizationSettings) {
-    const data = await request<{ settings: OrganizationSettings }>("/api/settings", {
-      method: "PATCH",
-      body: JSON.stringify(input),
-    });
-    return data.settings;
-  },
-
   /** POST /api/auth/logout — limpa o cookie de sessao. */
   async logout() {
     await request<{ ok: true }>("/api/auth/logout", { method: "POST" });
@@ -251,6 +246,11 @@ export const apiClient = {
     return data.group;
   },
 
+  /** POST /api/groups/:groupId/renew-cycle — gera o ciclo do mês corrente sob demanda (só para grupos em modo manual). */
+  async renewGroupCycle(groupId: string) {
+    await request<{ billingPeriod: unknown }>(`/api/groups/${groupId}/renew-cycle`, { method: "POST" });
+  },
+
   /** GET /api/groups/:groupId/charges — todas as cobrancas reais do grupo (todos os periodos). */
   async listGroupCharges(groupId: string) {
     const data = await request<{ charges: GroupCharge[] }>(`/api/groups/${groupId}/charges`, { method: "GET" });
@@ -273,12 +273,14 @@ export const apiClient = {
     });
   },
 
-  /** GET /api/groups/:groupId/participants — participantes ativos do grupo. */
+  /** POST /api/charges/:chargeId/cancel — cancela uma cobrança em aberto (não é baixa). */
+  async cancelCharge(chargeId: string) {
+    await request<{ ok: true }>(`/api/charges/${chargeId}/cancel`, { method: "POST" });
+  },
+
+  /** GET /api/groups/:groupId/participants — participantes ativos do grupo e a ordem de cadastro das tags. */
   async listGroupParticipants(groupId: string) {
-    const data = await request<{ participants: GroupParticipant[] }>(`/api/groups/${groupId}/participants`, {
-      method: "GET",
-    });
-    return data.participants;
+    return request<ListGroupParticipantsResult>(`/api/groups/${groupId}/participants`, { method: "GET" });
   },
 
   /**
@@ -301,11 +303,22 @@ export const apiClient = {
 
   /** PATCH /api/groups/:groupId/participants/:participantId — altera o valor individual do vinculo. */
   async updateGroupParticipantBillingAmount(groupId: string, participantId: string, billingAmount: number) {
-    return request<UpdateGroupParticipantBillingResult>(
+    return request<UpdateGroupParticipantResult>(
       `/api/groups/${groupId}/participants/${participantId}`,
       {
         method: "PATCH",
         body: JSON.stringify({ billingAmount }),
+      },
+    );
+  },
+
+  /** PATCH /api/groups/:groupId/participants/:participantId — altera a categoria (tag) do vinculo. */
+  async updateGroupParticipantTag(groupId: string, participantId: string, tag: string | null) {
+    return request<UpdateGroupParticipantResult>(
+      `/api/groups/${groupId}/participants/${participantId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ tag }),
       },
     );
   },
@@ -379,5 +392,29 @@ export const apiClient = {
       { method: "POST", body: JSON.stringify(input), cache: "no-store" },
     );
     return data.payment;
+  },
+
+  /** PATCH /api/auth/password — troca a senha do usuário logado. */
+  async changePassword(input: { currentPassword: string; newPassword: string }) {
+    await request<{ ok: true }>("/api/auth/password", {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  },
+
+  /** POST /api/auth/forgot-password — sempre responde ok, exista ou não a conta. */
+  async forgotPassword(email: string) {
+    await request<{ ok: true }>("/api/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    });
+  },
+
+  /** POST /api/auth/reset-password */
+  async resetPassword(input: { token: string; newPassword: string }) {
+    await request<{ ok: true }>("/api/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
   },
 };

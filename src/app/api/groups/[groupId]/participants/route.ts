@@ -13,11 +13,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ gro
     const session = await requireOrganization();
     const { groupId } = await params;
 
-    const participants = await listGroupParticipants(session.organizationId, groupId);
-    if (!participants) {
+    const result = await listGroupParticipants(session.organizationId, groupId);
+    if (!result) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
-    return NextResponse.json({ participants });
+    return NextResponse.json(result);
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });

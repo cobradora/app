@@ -15,6 +15,7 @@ import {
   linkParticipantToGroup,
   unlinkParticipantFromGroup,
   updateParticipant,
+  updateGroupParticipantTag,
   listGroupParticipants,
   ParticipantNameConflictError,
   ParticipantCheckoutInProgressError,
@@ -187,18 +188,18 @@ describe("participants service", () => {
     await linkParticipantToGroup(organizationId, groupId, left.id, new Date("2026-08-01T12:00:00Z"));
     await unlinkParticipantFromGroup(organizationId, groupId, left.id);
 
-    const rows = await listGroupParticipants(organizationId, groupId);
+    const result = await listGroupParticipants(organizationId, groupId);
 
-    expect(rows).toHaveLength(1);
-    expect(rows![0].participantId).toBe(active.id);
+    expect(result!.participants).toHaveLength(1);
+    expect(result!.participants[0].participantId).toBe(active.id);
   });
 
   it("listGroupParticipants retorna null quando o grupo nao pertence a organizacao", async () => {
     const [otherOrg] = await db.insert(organizations).values({ name: "Outra Org" }).returning();
 
-    const rows = await listGroupParticipants(otherOrg.id, groupId);
+    const result = await listGroupParticipants(otherOrg.id, groupId);
 
-    expect(rows).toBeNull();
+    expect(result).toBeNull();
   });
 
   it("proibe nomes equivalentes por acento, caixa e espacos no mesmo grupo", async () => {
@@ -257,5 +258,55 @@ describe("participants service", () => {
     await expect(
       addParticipantToGroup(organizationId, groupId, { name: "Inválido", phone: "11 1234-5678" }),
     ).rejects.toThrow();
+  });
+
+  it("grava a tag no vinculo e registra a ordem de cadastro em group_tags", async () => {
+    const added = await addParticipantToGroup(
+      organizationId,
+      groupId,
+      { name: "Ana", phone: "(11) 98888-0010", tag: "Sub-15" },
+      new Date("2026-08-01T12:00:00Z"),
+    );
+
+    const result = await listGroupParticipants(organizationId, groupId);
+    const row = result!.participants.find((p) => p.participantId === added!.participant.id);
+    expect(row?.tag).toBe("Sub-15");
+    expect(result!.tagOrder).toEqual(["Sub-15"]);
+  });
+
+  it("updateGroupParticipantTag altera a tag e preserva a ordem de cadastro ja existente", async () => {
+    const first = await addParticipantToGroup(
+      organizationId,
+      groupId,
+      { name: "Beto", phone: "(11) 98888-0011", tag: "Sub-15" },
+      new Date("2026-08-01T12:00:00Z"),
+    );
+    const second = await addParticipantToGroup(
+      organizationId,
+      groupId,
+      { name: "Carla", phone: "(11) 98888-0012" },
+      new Date("2026-08-01T12:00:00Z"),
+    );
+
+    const updated = await updateGroupParticipantTag(organizationId, groupId, second!.participant.id, { tag: "Veterano" });
+    expect(updated?.tag).toBe("Veterano");
+
+    // "Sub-15" ja existia antes de "Veterano" — a ordem reflete quem foi cadastrado primeiro.
+    const result = await listGroupParticipants(organizationId, groupId);
+    expect(result!.tagOrder).toEqual(["Sub-15", "Veterano"]);
+
+    // Reaproveitar "Sub-15" de novo nao deve duplicar nem reordenar o catalogo.
+    await updateGroupParticipantTag(organizationId, groupId, first!.participant.id, { tag: "Sub-15" });
+    const afterReuse = await listGroupParticipants(organizationId, groupId);
+    expect(afterReuse!.tagOrder).toEqual(["Sub-15", "Veterano"]);
+  });
+
+  it("updateGroupParticipantTag retorna null para vinculo de outra organizacao", async () => {
+    const [otherOrg] = await db.insert(organizations).values({ name: "Outra Org" }).returning();
+    const participant = await findOrCreateParticipantByPhone(organizationId, "(11) 98888-0013");
+    await linkParticipantToGroup(organizationId, groupId, participant.id, new Date("2026-08-01T12:00:00Z"));
+
+    const result = await updateGroupParticipantTag(otherOrg.id, groupId, participant.id, { tag: "Sub-15" });
+    expect(result).toBeNull();
   });
 });

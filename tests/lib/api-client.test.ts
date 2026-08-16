@@ -224,16 +224,16 @@ describe("apiClient", () => {
     expect(participant).toEqual({ id: "p1", name: "Novo nome" });
   });
 
-  it("listGroupParticipants faz GET /api/groups/:groupId/participants e retorna participants", async () => {
+  it("listGroupParticipants faz GET /api/groups/:groupId/participants e retorna participants e tagOrder", async () => {
     mockFetchOnce({
       ok: true,
-      json: async () => ({ participants: [{ participantId: "p1", name: "Marina", phoneDisplay: "(11) 98812-4410" }] }),
+      json: async () => ({ participants: [{ participantId: "p1", name: "Marina", phoneDisplay: "(11) 98812-4410" }], tagOrder: [] }),
     });
 
-    const participants = await apiClient.listGroupParticipants("g1");
+    const result = await apiClient.listGroupParticipants("g1");
 
     expect(global.fetch).toHaveBeenCalledWith("/api/groups/g1/participants", expect.objectContaining({ method: "GET" }));
-    expect(participants).toEqual([{ participantId: "p1", name: "Marina", phoneDisplay: "(11) 98812-4410" }]);
+    expect(result).toEqual({ participants: [{ participantId: "p1", name: "Marina", phoneDisplay: "(11) 98812-4410" }], tagOrder: [] });
   });
 
   it("lanca erro legivel quando o guard de saldo pendente rejeita a arquivamento (409)", async () => {

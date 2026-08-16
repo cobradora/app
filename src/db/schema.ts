@@ -102,9 +102,13 @@ export const groups = pgTable("groups", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id),
   name: varchar("name", { length: 200 }).notNull(),
   publicSlug: varchar("public_slug", { length: 100 }).notNull(),
-  billingDay: integer("billing_day").notNull(),
+  // Nulo = renovação manual (sem cron automático para este grupo).
+  billingDay: integer("billing_day"),
   defaultAmount: integer("default_amount").notNull(),
   status: groupStatusEnum("status").notNull().default("active"),
+  messageIntro: varchar("message_intro", { length: 1000 }).notNull().default(""),
+  messageOutro: varchar("message_outro", { length: 1000 }).notNull().default(""),
+  messageParticipantFilter: messageParticipantFilterEnum("message_participant_filter").notNull().default("all"),
 }, (table) => ({
   slugUnique: uniqueIndex("groups_public_slug_unique").on(table.publicSlug),
   organizationIdentityUnique: uniqueIndex("groups_organization_id_id_unique")
@@ -169,6 +173,9 @@ export const groupParticipants = pgTable("group_participants", {
   participantNameNormalized: varchar("participant_name_normalized", { length: 200 }).notNull(),
   leftAt: timestamp("left_at", { withTimezone: true }),
   status: groupParticipantStatusEnum("status").notNull().default("active"),
+  // Categoria livre do participante neste grupo (ex.: "Sub-15"). A ordem de
+  // exibição na mensagem de cobrança vem de group_tags.createdAt, não daqui.
+  tag: varchar("tag", { length: 60 }),
 }, (table) => ({
   // Um participante só pode ter UM vínculo ativo por grupo (RB-003 + RB-018:
   // sair e voltar cria uma nova linha, preservando o histórico da anterior).
@@ -182,6 +189,18 @@ export const groupParticipants = pgTable("group_participants", {
     "group_participants_billing_amount_check",
     sql`${table.billingAmount} between 1 and 100000000`,
   ),
+}));
+
+// ---------- group_tags ----------
+// Registra a ordem de primeira aparição de cada valor de tag dentro de um
+// grupo (nunca atualizado depois de criado), para a mensagem de cobrança
+// ordenar participantes pela ordem de cadastro das tags, não alfabeticamente.
+export const groupTags = pgTable("group_tags", {
+  groupId: uuid("group_id").notNull().references(() => groups.id),
+  tag: varchar("tag", { length: 60 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  pk: unique("group_tags_pk").on(table.groupId, table.tag),
 }));
 
 // ---------- billing_periods ----------

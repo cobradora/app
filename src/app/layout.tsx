@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import favicon from "@/images/favicon.png";
 import "./globals.css";
@@ -14,6 +14,13 @@ export const metadata: Metadata = {
     shortcut: favicon.src,
     apple: favicon.src,
   },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

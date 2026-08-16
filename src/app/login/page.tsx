@@ -62,7 +62,10 @@ export default function LoginPage() {
             />
           </div>
 
-          <label htmlFor="password">Senha</label>
+          <div className="auth-label-row">
+            <label htmlFor="password">Senha</label>
+            <Link className="auth-inline-link" href="/forgot-password">Esqueci minha senha</Link>
+          </div>
           <div className="auth-input">
             <input
               id="password"

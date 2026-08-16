@@ -2,7 +2,7 @@ import { db } from "@/db";
 import { organizations, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { hashPassword } from "@/lib/password";
+import { hashPassword, verifyPassword } from "@/lib/password";
 
 export const signUpInput = z.object({
   organizationName: z.string().min(1).max(200),
@@ -49,4 +49,44 @@ export async function getUserById(userId: string) {
     .from(users)
     .where(eq(users.id, userId));
   return user ?? null;
+}
+
+export class InvalidCurrentPasswordError extends Error {
+  constructor() {
+    super("Senha atual incorreta");
+    this.name = "InvalidCurrentPasswordError";
+  }
+}
+
+export const changePasswordInput = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(200),
+});
+
+export type ChangePasswordInput = z.infer<typeof changePasswordInput>;
+
+export async function changePassword(userId: string, rawInput: ChangePasswordInput) {
+  const input = changePasswordInput.parse(rawInput);
+  const [user] = await db.select().from(users).where(eq(users.id, userId));
+  if (!user || !user.passwordHash || !(await verifyPassword(input.currentPassword, user.passwordHash))) {
+    throw new InvalidCurrentPasswordError();
+  }
+
+  const passwordHash = await hashPassword(input.newPassword);
+  await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
+}
+
+/**
+ * Sempre retorna sem lançar, exista ou não o e-mail — o chamador (rota)
+ * decide se dispara o e-mail de reset, mas nunca revela ao cliente se a
+ * conta existe.
+ */
+export async function findUserByEmailForPasswordReset(email: string) {
+  const [user] = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.email, email));
+  return user ?? null;
+}
+
+export async function resetPasswordWithToken(userId: string, newPassword: string) {
+  const passwordHash = await hashPassword(z.string().min(8).max(200).parse(newPassword));
+  await db.update(users).set({ passwordHash }).where(eq(users.id, userId));
 }

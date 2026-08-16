@@ -4,7 +4,8 @@ import {
   ParticipantBillingCheckoutPendingError,
   unlinkParticipantFromGroup,
   updateGroupParticipantBillingAmount,
-  updateGroupParticipantBillingInput,
+  updateGroupParticipantTag,
+  updateGroupParticipantInput,
 } from "@/services/participants";
 import { z } from "zod";
 
@@ -15,17 +16,30 @@ export async function PATCH(
   try {
     const session = await requireAdmin();
     const { groupId, participantId } = await params;
-    const input = updateGroupParticipantBillingInput.parse(await request.json());
-    const result = await updateGroupParticipantBillingAmount(
-      session.organizationId,
-      groupId,
-      participantId,
-      input,
-    );
-    if (!result) {
-      return NextResponse.json({ error: "not_found" }, { status: 404 });
+    const input = updateGroupParticipantInput.parse(await request.json());
+
+    let billingResult = null;
+    if (input.billingAmount !== undefined) {
+      billingResult = await updateGroupParticipantBillingAmount(session.organizationId, groupId, participantId, {
+        billingAmount: input.billingAmount,
+      });
+      if (!billingResult) {
+        return NextResponse.json({ error: "not_found" }, { status: 404 });
+      }
     }
-    return NextResponse.json(result);
+
+    let tagResult = null;
+    if (input.tag !== undefined) {
+      tagResult = await updateGroupParticipantTag(session.organizationId, groupId, participantId, { tag: input.tag });
+      if (!tagResult) {
+        return NextResponse.json({ error: "not_found" }, { status: 404 });
+      }
+    }
+
+    return NextResponse.json({
+      participant: { participantId, billingAmount: billingResult?.participant.billingAmount, tag: tagResult?.tag },
+      updatedOpenCharges: billingResult?.updatedOpenCharges ?? 0,
+    });
   } catch (err) {
     if (err instanceof UnauthorizedError) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });

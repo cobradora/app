@@ -551,6 +551,13 @@ ul {
   border-color: var(--pink-light);
 }
 
+.pending-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
 .person-avatar {
   width: 40px;
   height: 40px;
@@ -808,8 +815,37 @@ ul {
   border-radius: 15px;
 }
 
-.setting-card--message {
+.icon-button--danger {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 11px;
+  color: #b3403a;
+}
+
+.icon-button--danger:not(:disabled):hover {
+  border-color: #e7b3ae;
+  background: #fbeceb;
+}
+
+.setting-card--message,
+.setting-card--password {
   grid-column: 1 / -1;
+}
+
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px !important;
+  font-size: 0.78rem !important;
+  font-weight: 700 !important;
+  color: var(--brown) !important;
+}
+
+.checkbox-label input {
+  width: auto !important;
+  min-height: auto !important;
 }
 
 .setting-card code {
@@ -1151,6 +1187,10 @@ ul {
   font-size: 0.78rem;
 }
 
+.drawer-header__renew {
+  margin-top: 10px;
+}
+
 .drawer-body {
   flex: 1;
   overflow-y: auto;
@@ -1363,6 +1403,25 @@ ul {
   flex: 0 0 auto;
 }
 
+.participant-settle-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.tag-chip {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: var(--pink-pale);
+  color: var(--pink-deep);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
 .modal-backdrop {
   z-index: 110;
   align-items: center;
@@ -1372,7 +1431,7 @@ ul {
 
 .modal-card {
   width: min(430px, 100%);
-  max-height: calc(100dvh - 36px);
+  max-height: calc(var(--modal-vvh, 100dvh) - 36px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 24px;
@@ -1717,6 +1776,41 @@ ul {
   color: #ae9690;
 }
 
+.auth-input__toggle {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-right: 7px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.auth-input__toggle:hover {
+  background: var(--pink-pale);
+  color: var(--pink-deep);
+}
+
+.auth-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.auth-label-row label {
+  margin-top: 8px;
+}
+
+.auth-inline-link {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--pink-deep);
+}
+
 .auth-submit {
   margin-top: 10px;
 }
@@ -1737,6 +1831,84 @@ ul {
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
+}
+
+.auth-consent {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* Páginas de texto longo (política de privacidade, termos de uso) */
+.legal-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 20px 80px;
+}
+
+.legal-page__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 24px;
+  color: var(--pink-deep);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.legal-page h1 {
+  color: var(--brown);
+  font-size: clamp(1.7rem, 5vw, 2.2rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.legal-page__updated {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.legal-page h2 {
+  margin-top: 34px;
+  margin-bottom: 10px;
+  color: var(--brown);
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.legal-page p,
+.legal-page li {
+  color: var(--brown-soft);
+  font-size: 0.92rem;
+  line-height: 1.7;
+}
+
+.legal-page p + p {
+  margin-top: 12px;
+}
+
+.legal-page ul {
+  margin-top: 10px;
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  list-style: disc;
+}
+
+.legal-page strong {
+  color: var(--brown);
+}
+
+@media (max-width: 540px) {
+  .legal-page {
+    padding: 32px 16px 60px;
+  }
 }
 
 /* Checkout público e tela de confirmação */
@@ -2256,8 +2428,7 @@ ul {
   .modal-card,
   .modal-card--wide {
     width: 100%;
-    max-height: 96vh;
-    max-height: 96dvh;
+    max-height: min(96dvh, calc(var(--modal-vvh, 100dvh) - 24px));
     padding: 22px 18px max(24px, env(safe-area-inset-bottom));
     border-radius: 26px 26px 0 0;
   }
@@ -2752,7 +2923,7 @@ ul {
 
   .modal-card,
   .modal-card--wide {
-    max-height: calc(100dvh - env(safe-area-inset-top));
+    max-height: calc(var(--modal-vvh, 100dvh) - env(safe-area-inset-top));
     padding-right: 14px;
     padding-left: 14px;
     border-radius: 22px 22px 0 0;
@@ -2871,8 +3042,8 @@ ul {
   .group-drawer,
   .modal-card,
   .modal-card--wide {
-    height: 100dvh;
-    max-height: 100dvh;
+    height: var(--modal-vvh, 100dvh);
+    max-height: var(--modal-vvh, 100dvh);
     border-radius: 0;
   }
 
@@ -2905,6 +3076,71 @@ ul {
   .checkout-card {
     margin-top: max(8px, env(safe-area-inset-top));
     margin-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+}
+
+.mobile-tabbar {
+  display: none;
+}
+
+.mobile-only {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .mobile-tab-hidden {
+    display: none !important;
+  }
+
+  .dashboard-main {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
+  .app-footer .footer-brand,
+  .app-footer .footer-nav {
+    display: none;
+  }
+
+  .mobile-only {
+    display: flex;
+  }
+
+  .settings-grid > .mobile-only {
+    grid-column: 1 / -1;
+  }
+
+  .mobile-tabbar {
+    position: fixed;
+    z-index: 90;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    padding: 6px 4px max(6px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.97);
+    backdrop-filter: blur(6px);
+    box-shadow: 0 -8px 20px rgba(107, 62, 46, 0.08);
+  }
+
+  .mobile-tabbar button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 6px 2px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 0.62rem;
+    font-weight: 800;
+  }
+
+  .mobile-tabbar button.active {
+    color: var(--pink-deep);
+    background: var(--pink-pale);
   }
 }
 
