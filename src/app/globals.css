@@ -426,6 +426,12 @@ ul {
   margin-bottom: 22px;
 }
 
+.section-heading__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .section-heading h2,
 .section-heading h3 {
   margin-top: 5px;
@@ -2253,6 +2259,33 @@ ul {
 
   .drawer-header {
     padding-top: max(18px, env(safe-area-inset-top));
+    padding-bottom: 12px;
+    gap: 9px;
+  }
+
+  .drawer-header h2 {
+    margin-top: 2px;
+    font-size: 1.05rem;
+  }
+
+  .drawer-header .section-kicker {
+    font-size: 0.62rem;
+  }
+
+  .drawer-header > div > span {
+    margin-top: 2px;
+    font-size: 0.7rem;
+  }
+
+  .drawer-header__renew {
+    margin-top: 6px;
+  }
+
+  .drawer-header .icon-button--large {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+    border-radius: 11px;
   }
 }
 
@@ -2421,7 +2454,10 @@ ul {
   }
 
   .modal-backdrop {
-    align-items: flex-end;
+    /* Ancorado no topo (não embaixo): com o teclado aberto, uma folha
+       grudada na base fica exatamente atrás dele. Grudada no topo, o
+       campo focado sobra visível acima do teclado. */
+    align-items: flex-start;
     padding: 0;
   }
 
@@ -2429,8 +2465,8 @@ ul {
   .modal-card--wide {
     width: 100%;
     max-height: min(96dvh, calc(var(--modal-vvh, 100dvh) - 24px));
-    padding: 22px 18px max(24px, env(safe-area-inset-bottom));
-    border-radius: 26px 26px 0 0;
+    padding: max(22px, env(safe-area-inset-top)) 18px 24px;
+    border-radius: 0 0 26px 26px;
   }
 
   .field-grid {
@@ -2871,10 +2907,6 @@ ul {
     gap: 10px;
   }
 
-  .drawer-header h2 {
-    font-size: 1.45rem;
-  }
-
   .drawer-metrics {
     grid-template-columns: 1fr;
   }
@@ -2926,7 +2958,7 @@ ul {
     max-height: calc(var(--modal-vvh, 100dvh) - env(safe-area-inset-top));
     padding-right: 14px;
     padding-left: 14px;
-    border-radius: 22px 22px 0 0;
+    border-radius: 0 0 22px 22px;
   }
 
   .modal-header {

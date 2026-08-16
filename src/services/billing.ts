@@ -15,6 +15,7 @@ export async function generateBillingPeriod(
   groupId: string,
   referenceMonth: string,
   options?: { dueDate?: string },
+  now = new Date(),
 ) {
   if (!isReferenceMonth(referenceMonth)) throw new Error("Mês de referência inválido");
 
@@ -34,7 +35,7 @@ export async function generateBillingPeriod(
   if (!dueDate) throw new Error("Grupo sem dia de renovação configurado e sem data informada");
 
   return db.transaction(async (tx) => {
-    const [period] = await tx
+    const [inserted] = await tx
       .insert(billingPeriods)
       .values({
         groupId,
@@ -44,6 +45,16 @@ export async function generateBillingPeriod(
       .onConflictDoNothing({ target: [billingPeriods.groupId, billingPeriods.referenceMonth] })
       .returning();
 
+    let period = inserted;
+    // Corte de elegibilidade: por padrão é o vencimento do próprio período
+    // (comportamento original, usado pelo Cron — ver comentário abaixo).
+    // Quando o período JÁ existia (ex.: 2º clique em "Renovar ciclo" no
+    // mesmo mês), usamos a data de hoje em vez do vencimento congelado da
+    // primeira geração — participantes de grupo manual entram elegíveis "a
+    // partir de hoje" (participants.ts), e só viram cobrança de fato quando
+    // o admin renovar de novo; travar no vencimento antigo os deixaria de
+    // fora pra sempre.
+    let eligibilityCutoff = period?.dueDate;
     if (!period) {
       const [existing] = await tx
         .select()
@@ -55,7 +66,8 @@ export async function generateBillingPeriod(
           ),
         );
       if (!existing) throw new Error("Falha ao recuperar ciclo já gerado");
-      return existing;
+      period = existing;
+      eligibilityCutoff = todayInBillingTimeZone(now);
     }
 
     const eligibleParticipants = await tx
@@ -74,21 +86,34 @@ export async function generateBillingPeriod(
       .where(
         and(
           eq(groupParticipants.groupId, groupId),
-          lte(groupParticipants.billingStartsOn, period.dueDate),
+          lte(groupParticipants.billingStartsOn, eligibilityCutoff),
           // O Cron pode fazer catch-up dias depois. A elegibilidade precisa
           // refletir quem fazia parte do grupo no corte, não apenas quem está
           // ativo no instante tardio da execução.
-          sql<boolean>`(${groupParticipants.joinedAt} at time zone ${BILLING_TIME_ZONE})::date <= ${period.dueDate}::date`,
+          sql<boolean>`(${groupParticipants.joinedAt} at time zone ${BILLING_TIME_ZONE})::date <= ${eligibilityCutoff}::date`,
           or(
             isNull(groupParticipants.leftAt),
-            sql<boolean>`(${groupParticipants.leftAt} at time zone ${BILLING_TIME_ZONE})::date >= ${period.dueDate}::date`,
+            sql<boolean>`(${groupParticipants.leftAt} at time zone ${BILLING_TIME_ZONE})::date >= ${eligibilityCutoff}::date`,
           ),
         ),
       );
 
-    if (eligibleParticipants.length > 0) {
+    const alreadyCharged = new Set(
+      (
+        await tx
+          .select({ participantId: charges.participantId })
+          .from(charges)
+          .where(eq(charges.billingPeriodId, period.id))
+      ).map((row) => row.participantId),
+    );
+    // O período pode já existir (ex.: clique repetido em "Renovar ciclo" num
+    // grupo manual) — nesse caso só complementamos quem ainda não tem
+    // cobrança nele, sem duplicar quem já foi cobrado.
+    const participantsToCharge = eligibleParticipants.filter((link) => !alreadyCharged.has(link.participantId));
+
+    if (participantsToCharge.length > 0) {
       await tx.insert(charges).values(
-        eligibleParticipants.map((link) => ({
+        participantsToCharge.map((link) => ({
           billingPeriodId: period.id,
           participantId: link.participantId,
           originalAmount: link.billingAmount,
@@ -96,7 +121,7 @@ export async function generateBillingPeriod(
           fineAmount: 0,
           interestAmount: 0,
           totalAmount: link.billingAmount,
-          dueDate: period.dueDate,
+          dueDate: eligibilityCutoff,
         })),
       );
     }
@@ -224,5 +249,5 @@ export async function renewGroupCycleManually(organizationId: string, groupId: s
 
   const referenceMonth = currentReferenceMonth(now);
   const dueDate = todayInBillingTimeZone(now);
-  return generateBillingPeriod(organizationId, groupId, referenceMonth, { dueDate });
+  return generateBillingPeriod(organizationId, groupId, referenceMonth, { dueDate }, now);
 }

@@ -1201,7 +1201,14 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
         <section id="grupos" className={`surface groups-section ${mobileTab === "home" || mobileTab === "grupos" ? "" : "mobile-tab-hidden"}`} aria-labelledby="groups-title">
           <div className="section-heading">
             <div><p className="section-kicker">Seus grupos</p><h2 id="groups-title">Abra um grupo para gerenciar</h2></div>
-            <span className="count-pill">{groupsLoading ? "…" : activeGroups.length}</span>
+            <div className="section-heading__actions">
+              <span className="count-pill">{groupsLoading ? "…" : activeGroups.length}</span>
+              {isAdmin && (
+                <button className="button button--primary button--small mobile-only" type="button" onClick={() => setGroupModal(true)}>
+                  <Plus size={16} /> Novo grupo
+                </button>
+              )}
+            </div>
           </div>
           {groupsLoading ? (
             <div className="skeleton-row" aria-label="Carregando grupos"><span /><span /><span /></div>

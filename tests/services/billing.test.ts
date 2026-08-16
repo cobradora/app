@@ -96,6 +96,27 @@ describe("billing service", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("clicar em renovar de novo no mesmo mês completa cobrança pra participante adicionado depois, sem duplicar quem já foi cobrado", async () => {
+    const [manualGroup] = await db
+      .insert(groups)
+      .values({ organizationId, name: "Manual", publicSlug: "manual-efgh", billingDay: null, defaultAmount: 5000 })
+      .returning();
+    const first = await findOrCreateParticipantByPhone(organizationId, "(11) 98812-4410");
+    await linkParticipantToGroup(organizationId, manualGroup.id, first.id, new Date("2026-08-01T12:00:00Z"));
+
+    const firstRenew = await renewGroupCycleManually(organizationId, manualGroup.id, new Date("2026-08-05T12:00:00-03:00"));
+
+    const second = await findOrCreateParticipantByPhone(organizationId, "(11) 98812-4411");
+    await linkParticipantToGroup(organizationId, manualGroup.id, second.id, new Date("2026-08-06T12:00:00Z"));
+
+    const secondRenew = await renewGroupCycleManually(organizationId, manualGroup.id, new Date("2026-08-15T12:00:00-03:00"));
+
+    expect(secondRenew!.id).toBe(firstRenew!.id);
+    const rows = await db.select().from(charges).where(eq(charges.billingPeriodId, secondRenew!.id));
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.participantId).sort()).toEqual([first.id, second.id].sort());
+  });
+
   it("recusa renovação manual para grupo com billingDay configurado", async () => {
     await expect(renewGroupCycleManually(organizationId, groupId, new Date())).rejects.toThrow(GroupCycleNotManualError);
   });
