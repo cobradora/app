@@ -15,6 +15,7 @@ Como o `drizzle-kit migrate` não conseguiu se conectar diretamente a este proje
 7. `0006_awesome_bullseye.sql` — adiciona `organization_settings.message_participant_filter` (todos/pagadores/pendentes na mensagem de cobrança).
 8. `0007_nappy_red_shift.sql` — torna `groups.billing_day` opcional (renovação manual), move a mensagem de cobrança para `groups` (`message_intro`/`message_outro`/`message_participant_filter`, substituindo `organization_settings`, que fica sem uso mas não é apagada) e cria `group_tags` + `group_participants.tag` para a categoria/ordenação de participantes.
 9. `0008_normal_lizard.sql` — cria `rate_limit_hits` (contador de janela fixa para limitar abuso nas rotas públicas). Linhas antigas são varridas pelo cron diário (`/api/cron/renewals`), não precisa de manutenção manual.
+10. `0009_classy_exiles.sql` — amplia `checkout_sessions.checkout_url` de `varchar(500)` para `text`. Links reais da InfinitePay passam de 500 caracteres (o `lenc` do link é variável), e o limite antigo derrubava a gravação do link **depois** de já criado na InfinitePay — todo checkout ficava com "Não foi possível preparar o checkout agora" mesmo com a chamada externa tendo funcionado.
 
 Depois de rodar as migrations, confira também `financial_contacts` e `organization_settings`. A `0004` interrompe de propósito se encontrar telefone legado inválido, nome normalizado duplicado no mesmo grupo, gateway duplicado ou dupla alocação; corrija os dados reportados antes de tentar novamente.
 

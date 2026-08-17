@@ -1,0 +1,1 @@
+ALTER TABLE "checkout_sessions" ALTER COLUMN "checkout_url" SET DATA TYPE text;

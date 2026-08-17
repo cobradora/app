@@ -64,6 +64,13 @@
       "when": 1786868457086,
       "tag": "0008_normal_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786994266233,
+      "tag": "0009_classy_exiles",
+      "breakpoints": true
     }
   ]
 }

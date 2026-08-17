@@ -267,7 +267,7 @@ export const checkoutSessions = pgTable("checkout_sessions", {
   recoveryTokenHash: varchar("recovery_token_hash", { length: 64 }),
   externalCreationState: varchar("external_creation_state", { length: 24 }).notNull().default("not_started"),
   externalRequestStartedAt: timestamp("external_request_started_at", { withTimezone: true }),
-  checkoutUrl: varchar("checkout_url", { length: 500 }),
+  checkoutUrl: text("checkout_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
   idempotencyUnique: uniqueIndex("checkout_sessions_organization_idempotency_unique")
