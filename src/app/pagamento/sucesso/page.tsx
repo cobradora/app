@@ -125,7 +125,7 @@ export default function PagamentoSucessoPage() {
               A InfinitePay ainda não confirmou o pagamento. Nenhuma cobrança foi marcada como paga antecipadamente.
             </p>
             {details && (
-              <button type="button" className="solid full" onClick={() => void verifyPayment(details)}>
+              <button type="button" className="button button--primary button--full" onClick={() => void verifyPayment(details)}>
                 Verificar novamente
               </button>
             )}
@@ -152,7 +152,7 @@ export default function PagamentoSucessoPage() {
             <h1 id="payment-status-title">Verificação temporariamente indisponível</h1>
             <p className="checkout-sub">Seu pagamento não foi baixado sem confirmação. Tente novamente em instantes.</p>
             {details && (
-              <button type="button" className="solid full" onClick={() => void verifyPayment(details)}>
+              <button type="button" className="button button--primary button--full" onClick={() => void verifyPayment(details)}>
                 Tentar novamente
               </button>
             )}

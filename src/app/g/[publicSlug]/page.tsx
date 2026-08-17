@@ -242,7 +242,7 @@ export default function PublicGroupPage() {
                   )}
                   <button
                     type="submit"
-                    className="solid full"
+                    className="button button--primary button--full"
                     disabled={loadingCharges || !isValidPhone(phone)}
                   >
                     {loadingCharges ? <><Spinner /> Consultando…</> : "Ver cobranças"}
@@ -256,7 +256,7 @@ export default function PublicGroupPage() {
                 <p className="checkout-sub" role="status">
                   Não há cobranças abertas para este telefone neste grupo. Confira o número ou fale com o organizador.
                 </p>
-                <button type="button" className="solid full" onClick={handleChangePhone}>
+                <button type="button" className="button button--primary button--full" onClick={handleChangePhone}>
                   Consultar outro telefone
                 </button>
               </>
@@ -319,14 +319,14 @@ export default function PublicGroupPage() {
                     <p className="checkout-sub" role="status">
                       Se você já pagou por uma tentativa anterior deste mesmo grupo, fale com o organizador antes de pagar de novo.
                     </p>
-                    <button type="button" className="solid full" onClick={() => window.location.assign(recoveredCheckoutUrl)}>
+                    <button type="button" className="button button--primary button--full" onClick={() => window.location.assign(recoveredCheckoutUrl)}>
                       Continuar para pagamento
                     </button>
                   </>
                 ) : (
                   <button
                     type="button"
-                    className="solid full"
+                    className="button button--primary button--full"
                     disabled={selectedCharges.length === 0 || submitting}
                     onClick={() => handleCheckout()}
                   >
@@ -337,7 +337,7 @@ export default function PublicGroupPage() {
                 {checkoutBlocked && !recoveredCheckoutUrl && (
                   <button
                     type="button"
-                    className="solid full"
+                    className="button button--primary button--full"
                     disabled={submitting}
                     onClick={() => handleCheckout(true)}
                   >
