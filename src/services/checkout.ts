@@ -107,7 +107,16 @@ async function sessionMatchesRequest(
   return sameIds(items.map((item) => item.chargeId), chargeIds);
 }
 
-function checkoutResult(session: Session, items: { amount: number }[], payerName: string, resumed: boolean) {
+type CheckoutResultValue = {
+  checkoutSessionId: string;
+  checkoutUrl: string;
+  totalChargesAmount: number;
+  payerName: string;
+  resumed: boolean;
+  recovered?: "resumed_previous" | "started_new";
+};
+
+function checkoutResult(session: Session, items: { amount: number }[], payerName: string, resumed: boolean): CheckoutResultValue {
   if (!session.checkoutUrl || session.expiresAt.getTime() <= Date.now()) {
     throw new PublicCheckoutError("checkout_in_progress", "O checkout ainda está sendo preparado. Tente novamente.", 409);
   }
@@ -795,6 +804,12 @@ async function createExternalCheckout(input: {
 
     return result.checkoutUrl;
   } catch (error) {
+    console.error("Checkout InfinitePay: criação externa falhou", {
+      sessionId: input.session.id,
+      mayHaveSucceeded: error instanceof InfinitePayCheckoutRequestError ? error.mayHaveSucceeded : null,
+      status: error instanceof InfinitePayCheckoutRequestError ? error.status : undefined,
+      message: error instanceof Error ? error.message : String(error),
+    });
     if (error instanceof InfinitePayCheckoutRequestError && !error.mayHaveSucceeded) {
       await cancelSessionAndReleaseCharges(input.session.id);
     } else {
@@ -814,7 +829,7 @@ export async function createCheckoutForCharges(
   chargeIds: string[],
   idempotencyKey: string,
   resetBlocked = false,
-) {
+): Promise<CheckoutResultValue> {
   const uniqueChargeIds = stableChargeIds(chargeIds);
   if (uniqueChargeIds.length === 0 || uniqueChargeIds.length !== chargeIds.length) {
     throw new PublicCheckoutError("charges_unavailable", "A seleção de cobranças é inválida", 400);
