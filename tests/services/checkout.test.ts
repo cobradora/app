@@ -12,7 +12,7 @@ vi.mock("@/payments", () => ({
 }));
 
 import { getPaymentsAdapter } from "@/payments";
-import { createCheckoutForCharges, expireStaleCheckoutSessions } from "@/services/checkout";
+import { createCheckoutForCharges, expireStaleCheckoutSessions, releaseStuckCheckoutForCharge } from "@/services/checkout";
 import { InfinitePayCheckoutRequestError } from "@/payments/infinitepay-adapter";
 
 function mockAdapter() {
@@ -296,6 +296,45 @@ describe("checkout service (InfinitePay, sem split)", () => {
     const [charge] = await db.select().from(charges).where(eq(charges.id, chargeBefore.id));
     expect(oldSession.status).toBe("canceled");
     expect(charge.status).toBe("checkout_pending");
+  });
+
+  it("releaseStuckCheckoutForCharge (admin) libera cobranca presa em sessao ambigua sem link", async () => {
+    const [chargeBefore] = await db.select().from(charges);
+    (getPaymentsAdapter() as unknown as { createCheckout: Mock }).createCheckout.mockRejectedValueOnce(
+      new InfinitePayCheckoutRequestError("timeout", true),
+    );
+    await expect(
+      createCheckoutForCharges(groupPublicSlug, phone, [chargeBefore.id], "idem-admin-libera-ambigua"),
+    ).rejects.toThrow(/Não foi possível preparar/);
+
+    const [chargeStuck] = await db.select().from(charges).where(eq(charges.id, chargeBefore.id));
+    expect(chargeStuck.status).toBe("checkout_pending");
+
+    await releaseStuckCheckoutForCharge(organizationId, chargeBefore.id);
+
+    const [chargeReleased] = await db.select().from(charges).where(eq(charges.id, chargeBefore.id));
+    expect(chargeReleased.status).toBe("open");
+    const [session] = await db
+      .select()
+      .from(checkoutSessions)
+      .where(eq(checkoutSessions.idempotencyKey, "idem-admin-libera-ambigua"));
+    expect(session.status).toBe("canceled");
+  });
+
+  it("releaseStuckCheckoutForCharge (admin) libera mesmo com link conhecido — diferente do fluxo publico, que preserva", async () => {
+    const [pendingCharge] = await db.select().from(charges);
+    const first = await createCheckoutForCharges(groupPublicSlug, phone, [pendingCharge.id], "idem-admin-libera-linkada");
+    expect(first.checkoutUrl).toBeTruthy();
+
+    const [chargeStuck] = await db.select().from(charges).where(eq(charges.id, pendingCharge.id));
+    expect(chargeStuck.status).toBe("checkout_pending");
+
+    await releaseStuckCheckoutForCharge(organizationId, pendingCharge.id);
+
+    const [chargeReleased] = await db.select().from(charges).where(eq(charges.id, pendingCharge.id));
+    expect(chargeReleased.status).toBe("open");
+    const [session] = await db.select().from(checkoutSessions).where(eq(checkoutSessions.id, first.checkoutSessionId));
+    expect(session.status).toBe("canceled");
   });
 
   it("grava webhookTokenHash (SHA-256 hex) na sessao criada", async () => {

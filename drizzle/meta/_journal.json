@@ -71,6 +71,13 @@
       "when": 1786994266233,
       "tag": "0009_classy_exiles",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787017306903,
+      "tag": "0010_magical_nebula",
+      "breakpoints": true
     }
   ]
 }

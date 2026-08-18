@@ -43,6 +43,7 @@ export async function createGroup(organizationId: string, rawInput: CreateGroupI
     .values({
       organizationId,
       name: input.name,
+      sport: input.sport ?? null,
       publicSlug: `${baseSlug}-${suffix}`,
       billingDay: input.billingDay ?? null,
       defaultAmount: input.defaultAmount,

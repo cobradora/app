@@ -1178,6 +1178,12 @@ ul {
   animation: fade-in 170ms ease both;
 }
 
+.drawer-backdrop {
+  /* Precisa ficar acima de .mobile-tabbar (z-index: 90) — sem isso o menu
+     inferior fixo do mobile fica por cima dos botões do drawer do grupo. */
+  z-index: 95;
+}
+
 .group-drawer {
   width: min(680px, 100%);
   height: 100vh;
@@ -1879,74 +1885,80 @@ ul {
   text-align: center;
 }
 
-/* Páginas de texto longo (política de privacidade, termos de uso) */
-.legal-page {
-  min-height: 100vh;
-  min-height: 100dvh;
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 48px 20px 80px;
+/* Páginas de texto longo (política de privacidade, termos de uso, cookies) */
+.legal-card {
+  box-shadow: 0 10px 30px -5px rgba(59, 33, 23, 0.08);
 }
 
-.legal-page__back {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 24px;
-  color: var(--pink-deep);
-  font-size: 0.8rem;
+.legal-content h2 {
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.legal-content h3 {
+  margin-top: 1.35rem;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
   font-weight: 800;
 }
 
-.legal-page h1 {
-  color: var(--brown);
-  font-size: clamp(1.7rem, 5vw, 2.2rem);
-  font-weight: 800;
-  letter-spacing: -0.03em;
+.legal-content p,
+.legal-content li {
+  font-size: 0.95rem;
+  line-height: 1.75;
+  color: rgba(59, 33, 23, 0.84);
 }
 
-.legal-page__updated {
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 0.8rem;
+.legal-content p {
+  margin: 0.65rem 0;
 }
 
-.legal-page h2 {
-  margin-top: 34px;
-  margin-bottom: 10px;
-  color: var(--brown);
-  font-size: 1.12rem;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-}
-
-.legal-page p,
-.legal-page li {
-  color: var(--brown-soft);
-  font-size: 0.92rem;
-  line-height: 1.7;
-}
-
-.legal-page p + p {
-  margin-top: 12px;
-}
-
-.legal-page ul {
-  margin-top: 10px;
-  padding-left: 20px;
-  display: grid;
-  gap: 8px;
+.legal-content ul {
+  margin: 0.65rem 0;
+  padding-left: 1.35rem;
   list-style: disc;
 }
 
-.legal-page strong {
-  color: var(--brown);
+.legal-content ol {
+  margin: 0.65rem 0;
+  padding-left: 1.35rem;
+  list-style: decimal;
 }
 
-@media (max-width: 540px) {
-  .legal-page {
-    padding: 32px 16px 60px;
-  }
+.legal-content a {
+  color: var(--brown);
+  text-decoration: underline;
+  text-decoration-color: var(--pink);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.legal-content table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.875rem;
+}
+
+.legal-content th,
+.legal-content td {
+  border: 1px solid var(--line-strong);
+  padding: 0.75rem;
+}
+
+.legal-content th {
+  background: var(--cream);
+}
+
+.notice {
+  margin: 1rem 0;
+  padding: 1rem 1.15rem;
+  border: 1px solid rgba(255, 133, 162, 0.45);
+  border-radius: 1rem;
+  background: var(--pink-pale);
 }
 
 /* Checkout público e tela de confirmação */
@@ -2272,6 +2284,12 @@ ul {
   .drawer-body {
     padding-left: 18px;
     padding-right: 18px;
+  }
+
+  .drawer-body {
+    /* Mesmo respiro reservado em .dashboard-main pro menu inferior fixo —
+       sem isso o menu cobre os últimos botões/linhas do drawer no mobile. */
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
   }
 
   .drawer-header {
@@ -2604,10 +2622,6 @@ ul {
     width: 44px;
     height: 44px;
     flex-basis: 44px;
-  }
-
-  .dashboard-main {
-    padding-bottom: 54px;
   }
 
   .surface,
@@ -3123,6 +3137,61 @@ ul {
   .checkout-card {
     margin-top: max(8px, env(safe-area-inset-top));
     margin-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+}
+
+.cookie-banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px 20px max(16px, env(safe-area-inset-bottom));
+  border-top: 2px solid var(--brown);
+  background: var(--cream);
+  box-shadow: 0 -8px 24px rgba(59, 33, 23, 0.12);
+}
+
+.cookie-banner p {
+  flex: 1 1 320px;
+  min-width: 0;
+  margin: 0;
+  color: var(--brown);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.cookie-banner p a {
+  color: var(--brown);
+  text-decoration: underline;
+  text-decoration-color: var(--pink);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.cookie-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 540px) {
+  .cookie-banner {
+    justify-content: stretch;
+  }
+
+  .cookie-banner__actions {
+    width: 100%;
+  }
+
+  .cookie-banner__actions .button {
+    flex: 1;
   }
 }
 

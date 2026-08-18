@@ -296,6 +296,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [cancelingChargeId, setCancelingChargeId] = useState<string | null>(null);
+  const [releasingChargeId, setReleasingChargeId] = useState<string | null>(null);
 
   const activeGroups = useMemo(() => groups.filter((group) => group.status !== "archived"), [groups]);
   const openGroup = groups.find((group) => group.id === openGroupId) ?? null;
@@ -903,9 +904,50 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   async function removeParticipantFromGroup() {
     if (!participantModal || !participantModalPerson) return;
     const { groupId, participantId } = participantModal;
+
+    const pendingCharge = charges.find(
+      (charge) =>
+        charge.participantId === participantId &&
+        charge.groupId === groupId &&
+        (charge.rawStatus === "open" || charge.rawStatus === "checkout_pending"),
+    );
+
+    let settleChoice: "settle" | "forgive" | null = null;
+    if (pendingCharge) {
+      const proceed = window.confirm(
+        `${participantModalPerson.name} tem uma cobrança pendente de ${formatMoney(pendingCharge.amount)} neste grupo. Clique OK para continuar (você escolhe a seguir dar baixa ou perdoar), ou Cancelar para desistir da remoção.`,
+      );
+      if (!proceed) return;
+      settleChoice = window.confirm(
+        "OK = Dar baixa (marcar a cobrança como paga). Cancelar = Perdoar a dívida (cancelar a cobrança).",
+      )
+        ? "settle"
+        : "forgive";
+    }
+
     setParticipantSaving(true);
     setParticipantError("");
     try {
+      if (pendingCharge && settleChoice === "settle") {
+        await apiClient.registerManualSettlement(pendingCharge.id, {
+          paymentMethod: "outro",
+          observation: "Baixa automática ao remover participante do grupo",
+        });
+        const today = new Date().toISOString().slice(0, 10);
+        setCharges((previous) =>
+          previous.map((charge) =>
+            charge.id === pendingCharge.id
+              ? { ...charge, status: "paid", rawStatus: "manually_paid", source: "manual", paidAt: today }
+              : charge,
+          ),
+        );
+      } else if (pendingCharge && settleChoice === "forgive") {
+        await apiClient.cancelCharge(pendingCharge.id);
+        setCharges((previous) =>
+          previous.map((charge) => (charge.id === pendingCharge.id ? { ...charge, status: "ignored", rawStatus: "canceled" } : charge)),
+        );
+      }
+
       await apiClient.removeParticipant(groupId, participantId);
       setParticipants((previous) =>
         previous.map((participant) =>
@@ -920,9 +962,6 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
               }
             : participant,
         ),
-      );
-      setCharges((previous) =>
-        previous.filter((charge) => !(charge.participantId === participantId && charge.groupId === groupId)),
       );
       setParticipantModal(null);
       flash(`${participantModalPerson.name} removido do grupo.`);
@@ -1153,6 +1192,28 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     }
   }
 
+  async function releaseStuckCheckout(chargeId: string) {
+    if (
+      !window.confirm(
+        "Liberar esta cobrança do checkout travado? Se a pessoa já tiver pago pelo link antigo, confira manualmente antes de dar baixa ou cancelar de novo.",
+      )
+    ) {
+      return;
+    }
+    setReleasingChargeId(chargeId);
+    try {
+      await apiClient.releaseCheckout(chargeId);
+      setCharges((previous) =>
+        previous.map((charge) => (charge.id === chargeId ? { ...charge, rawStatus: "open" } : charge)),
+      );
+      flash("Cobrança liberada — já dá pra dar baixa ou cancelar.");
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Erro ao liberar a cobrança.");
+    } finally {
+      setReleasingChargeId(null);
+    }
+  }
+
   const openGroupParticipants = openGroup
     ? participants.filter((participant) => participant.groupIds.includes(openGroup.id))
     : [];
@@ -1282,7 +1343,14 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                         <button className="button button--danger button--small" type="button" onClick={() => cancelCharge(charge.id)} disabled={cancelingChargeId === charge.id}>{cancelingChargeId === charge.id ? <Spinner size={15} /> : <X size={15} />} Cancelar dívida</button>
                       </span>
                     ) : charge.rawStatus === "checkout_pending" ? (
-                      <span className="status-pill">Em conciliação</span>
+                      <span className="pending-row__actions">
+                        <span className="status-pill">Em conciliação</span>
+                        {isAdmin && (
+                          <button className="button button--secondary button--small" type="button" onClick={() => releaseStuckCheckout(charge.id)} disabled={releasingChargeId === charge.id}>
+                            {releasingChargeId === charge.id && <Spinner size={15} />} Liberar cobrança
+                          </button>
+                        )}
+                      </span>
                     ) : null}
                   </li>
                 );
@@ -1392,7 +1460,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                   const label = !charge ? "Entra no próximo ciclo" : charge.status === "paid" ? `Pago${charge.paidAt ? ` em ${formatDate(charge.paidAt)}` : ""}` : charge.rawStatus === "checkout_pending" ? "Checkout em andamento" : "Aguardando pagamento";
                   const individualAmount = person.billingAmounts[openGroup.id];
                   const tag = person.tags[openGroup.id];
-                  return <li key={person.id}><button type="button" className="participant-button" onClick={() => isAdmin && openParticipantModal(openGroup.id, person)} disabled={!isAdmin}><span className={`status-dot ${charge?.status === "paid" ? "status-dot--paid" : !charge ? "status-dot--next" : ""}`} /><span className="person-avatar">{getInitials(person.name)}</span><span className="participant-button__main"><strong>{person.name}</strong><small>{person.phone} · {label}</small>{tag && <span className="tag-chip">{tag}</span>}</span><span className="participant-button__billing"><small>Valor individual</small><strong>{individualAmount ? formatMoney(individualAmount / 100) : charge ? formatMoney(charge.amount) : formatMoney(openGroup.amount)}</strong></span>{isAdmin && <Pencil className="participant-button__edit" size={16} aria-hidden="true" />}</button>{isAdmin && charge?.rawStatus === "open" && <span className="participant-settle-actions"><button type="button" className="button button--secondary button--small participant-settle" onClick={() => openSettleModal(charge.id)}>Dar baixa</button><button type="button" className="icon-button icon-button--danger" onClick={() => cancelCharge(charge.id)} aria-label={`Cancelar cobrança de ${person.name}`}><X size={15} /></button></span>}</li>;
+                  return <li key={person.id}><button type="button" className="participant-button" onClick={() => isAdmin && openParticipantModal(openGroup.id, person)} disabled={!isAdmin}><span className={`status-dot ${charge?.status === "paid" ? "status-dot--paid" : !charge ? "status-dot--next" : ""}`} /><span className="person-avatar">{getInitials(person.name)}</span><span className="participant-button__main"><strong>{person.name}</strong><small>{person.phone} · {label}</small>{tag && <span className="tag-chip">{tag}</span>}</span><span className="participant-button__billing"><small>Valor individual</small><strong>{individualAmount ? formatMoney(individualAmount / 100) : charge ? formatMoney(charge.amount) : formatMoney(openGroup.amount)}</strong></span>{isAdmin && <Pencil className="participant-button__edit" size={16} aria-hidden="true" />}</button>{isAdmin && charge?.rawStatus === "open" ? <span className="participant-settle-actions"><button type="button" className="button button--secondary button--small participant-settle" onClick={() => openSettleModal(charge.id)}>Dar baixa</button><button type="button" className="icon-button icon-button--danger" onClick={() => cancelCharge(charge.id)} aria-label={`Cancelar cobrança de ${person.name}`}><X size={15} /></button></span> : isAdmin && charge?.rawStatus === "checkout_pending" ? <span className="participant-settle-actions"><button type="button" className="button button--secondary button--small participant-settle" onClick={() => releaseStuckCheckout(charge.id)} disabled={releasingChargeId === charge.id}>{releasingChargeId === charge.id ? <Spinner size={15} /> : null} Liberar cobrança</button></span> : null}</li>;
                 })}</ul>}
               </section>
             </div>

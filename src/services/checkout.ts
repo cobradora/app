@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { db } from "@/db";
 import {
   groups,
+  organizations,
   financialContacts,
   participants,
   charges,
@@ -55,6 +56,25 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function referenceMonthLabel(referenceMonth: string): string {
+  const [year, month] = referenceMonth.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleDateString("pt-BR", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** "[modalidade] · [organização] · [competência]" — cada parte omitida se vazia. */
+function buildCheckoutItemDescription(input: {
+  sport: string | null;
+  organizationName: string;
+  referenceMonths: string[];
+}): string {
+  const competencia = [...new Set(input.referenceMonths)].map(referenceMonthLabel).join(", ");
+  return [input.sport?.trim(), input.organizationName.trim(), competencia].filter(Boolean).join(" · ");
+}
+
 function stableChargeIds(chargeIds: string[]): string[] {
   return [...new Set(chargeIds)].sort();
 }
@@ -83,6 +103,7 @@ type SelectedCharge = {
   groupId: string;
   totalAmount: number;
   status: typeof charges.$inferSelect.status;
+  referenceMonth: string;
 };
 
 async function loadSessionItems(sessionId: string) {
@@ -458,11 +479,18 @@ async function resumeKnownLinkSession(sessionId: string): Promise<Session | null
  * aqui é uma decisão explícita do participante assumindo o pequeno risco de
  * existir um link antigo que a InfinitePay tenha criado sem nossa confirmação.
  */
-async function cancelBlockedSessionAndReleaseCharges(sessionId: string): Promise<void> {
+async function cancelBlockedSessionAndReleaseCharges(
+  sessionId: string,
+  options?: { forceEvenWithKnownLink?: boolean },
+): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.execute(sql`select id from checkout_sessions where id = ${sessionId} for update`);
     const [session] = await tx.select().from(checkoutSessions).where(eq(checkoutSessions.id, sessionId));
-    if (!session || session.checkoutUrl || !["created", "pending", "expired"].includes(session.status)) return;
+    if (
+      !session ||
+      (!options?.forceEvenWithKnownLink && session.checkoutUrl) ||
+      !["created", "pending", "expired"].includes(session.status)
+    ) return;
 
     const items = await tx.select().from(checkoutItems).where(eq(checkoutItems.checkoutSessionId, sessionId));
     await tx.update(checkoutSessions).set({ status: "canceled" }).where(eq(checkoutSessions.id, sessionId));
@@ -474,6 +502,31 @@ async function cancelBlockedSessionAndReleaseCharges(sessionId: string): Promise
         .where(and(inArray(charges.id, items.map((item) => item.chargeId)), eq(charges.status, "checkout_pending")));
     }
   });
+}
+
+/**
+ * Ponto de entrada do botão admin "Liberar cobrança" (cobranças presas em
+ * "Em conciliação"/checkout_pending, sem nenhuma ação disponível hoje). Ao
+ * contrário do fluxo público (que preserva um link conhecido quando existe,
+ * pra não descartar um checkout ainda válido), aqui o admin está pedindo
+ * explicitamente pra destravar a cobrança e assumir o controle manual — libera
+ * mesmo que a sessão tenha um checkoutUrl conhecido, porque a intenção é dar
+ * baixa ou cancelar manualmente em seguida, não continuar o checkout.
+ */
+export async function releaseStuckCheckoutForCharge(organizationId: string, chargeId: string): Promise<void> {
+  const [charge] = await db
+    .select({ id: charges.id, status: charges.status })
+    .from(charges)
+    .innerJoin(billingPeriods, eq(charges.billingPeriodId, billingPeriods.id))
+    .innerJoin(groups, eq(billingPeriods.groupId, groups.id))
+    .where(and(eq(charges.id, chargeId), eq(groups.organizationId, organizationId)));
+  if (!charge) throw new Error("Cobrança não encontrada");
+  if (charge.status !== "checkout_pending") return;
+
+  const blocking = await findOverlappingBlockingSession(organizationId, [chargeId]);
+  if (!blocking) return;
+
+  await cancelBlockedSessionAndReleaseCharges(blocking.id, { forceEvenWithKnownLink: true });
 }
 
 /**
@@ -758,6 +811,7 @@ async function createExternalCheckout(input: {
   gatewayAccount: { id: string; externalAccountId: string };
   totalAmount: number;
   idempotencyKey: string;
+  itemDescription: string;
 }) {
   const startedSession = await startExternalCreation(input.session, input.gatewayAccount);
   const webhookToken = deriveCheckoutToken(input.session.id, "webhook");
@@ -777,6 +831,7 @@ async function createExternalCheckout(input: {
       recoveryToken,
       buyerName: input.responsibleName,
       buyerPhone: input.phoneNormalized,
+      description: input.itemDescription,
     });
 
     const [linked] = await db
@@ -841,6 +896,11 @@ export async function createCheckoutForCharges(
     .where(and(eq(groups.publicSlug, groupPublicSlug), eq(groups.status, "active")));
   if (!group) throw new PublicCheckoutError("group_not_found", "Grupo não encontrado", 404);
 
+  const [organization] = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(eq(organizations.id, group.organizationId));
+
   const phoneNormalized = normalizeAndValidatePhone(rawPhone);
   const [financialContact] = await db
     .select()
@@ -896,6 +956,7 @@ export async function createCheckoutForCharges(
       groupId: billingPeriods.groupId,
       totalAmount: charges.totalAmount,
       status: charges.status,
+      referenceMonth: billingPeriods.referenceMonth,
     })
     .from(charges)
     .innerJoin(participants, eq(charges.participantId, participants.id))
@@ -1016,6 +1077,11 @@ export async function createCheckoutForCharges(
 
   const items = await loadSessionItems(session.id);
   const totalChargesAmount = items.reduce((sum, item) => sum + item.amount, 0);
+  const itemDescription = buildCheckoutItemDescription({
+    sport: group.sport,
+    organizationName: organization?.name ?? "",
+    referenceMonths: selectedCharges.map((charge) => charge.referenceMonth),
+  });
   const checkoutUrl = await createExternalCheckout({
     session,
     organizationId: group.organizationId,
@@ -1023,6 +1089,7 @@ export async function createCheckoutForCharges(
     responsibleName: responsible.name,
     phoneNormalized: financialContact.phoneNormalized,
     gatewayAccount,
+    itemDescription,
     totalAmount: totalChargesAmount,
     idempotencyKey: session.idempotencyKey,
   });

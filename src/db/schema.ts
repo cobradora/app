@@ -101,6 +101,7 @@ export const groups = pgTable("groups", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id),
   name: varchar("name", { length: 200 }).notNull(),
+  sport: varchar("sport", { length: 60 }),
   publicSlug: varchar("public_slug", { length: 100 }).notNull(),
   // Nulo = renovação manual (sem cron automático para este grupo).
   billingDay: integer("billing_day"),

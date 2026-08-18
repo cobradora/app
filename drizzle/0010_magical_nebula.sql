@@ -1,0 +1,1 @@
+ALTER TABLE "groups" ADD COLUMN "sport" varchar(60);

@@ -120,7 +120,7 @@ export function createInfinitePayAdapter(): PaymentsAdapter {
           body: JSON.stringify({
             handle: input.gatewayExternalAccountId,
             order_nsu: orderNsu,
-            items: [{ quantity: 1, price: input.amount, description: "Cobrança CobraDora" }],
+            items: [{ quantity: 1, price: input.amount, description: input.description?.trim() || "Cobrança CobraDora" }],
             redirect_url: redirectUrl.href,
             webhook_url: webhookUrl.href,
             ...(input.buyerPhone && input.buyerName?.trim() && {

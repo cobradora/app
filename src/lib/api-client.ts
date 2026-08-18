@@ -290,6 +290,11 @@ export const apiClient = {
     await request<{ ok: true }>(`/api/charges/${chargeId}/cancel`, { method: "POST" });
   },
 
+  /** POST /api/charges/:chargeId/release-checkout — destrava uma cobrança presa em "Em conciliação", devolvendo pra "open". */
+  async releaseCheckout(chargeId: string) {
+    await request<{ ok: true }>(`/api/charges/${chargeId}/release-checkout`, { method: "POST" });
+  },
+
   /** GET /api/groups/:groupId/participants — participantes ativos do grupo e a ordem de cadastro das tags. */
   async listGroupParticipants(groupId: string) {
     return request<ListGroupParticipantsResult>(`/api/groups/${groupId}/participants`, { method: "GET" });

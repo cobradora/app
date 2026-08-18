@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useState } from "react";
+import cobraLogo from "@/images/logo-cobra-sem-fundo.png";
 
 type BillingPeriod = "monthly" | "annual";
 
@@ -77,7 +79,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-brand-pink rounded-full border-2 border-brand-chocolate flex items-center justify-center relative shadow-[0_3px_0px_#3B2117]">
-              <span className="text-brand-chocolate font-extrabold text-lg">$</span>
+              <Image src={cobraLogo} alt="" width={22} height={22} priority />
             </div>
             <div className="flex flex-col">
               <span className="font-extrabold text-xl tracking-tight leading-none">CobraDora</span>
@@ -140,7 +142,7 @@ export default function LandingPage() {
               <div className="flex items-center justify-between border-b border-brand-chocolate/10 pb-4 mb-5">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 bg-brand-pink rounded-full border-2 border-brand-chocolate flex items-center justify-center">
-                    <span className="text-brand-chocolate font-extrabold text-sm">$</span>
+                    <Image src={cobraLogo} alt="" width={18} height={18} />
                   </div>
                   <div>
                     <h3 className="font-extrabold text-sm leading-none">CobraDora</h3>
@@ -436,8 +438,8 @@ export default function LandingPage() {
 
       {/* FAQ */}
       <section className="py-20 bg-brand-creme border-t-2 border-brand-chocolate/10">
-        <div className="max-w-4xl mx-auto px-6">
-          <h2 className="text-3xl font-extrabold tracking-tight text-center mb-12">Perguntas Frequentes</h2>
+        <div className="max-w-4xl mx-auto px-4">
+          <h2 className="text-3xl font-extrabold tracking-tight text-center mb-10 -translate-y-[1cm]">Perguntas Frequentes</h2>
 
           <div className="space-y-6">
             <div className="bg-white border-2 border-brand-chocolate p-6 rounded-2xl">
@@ -476,7 +478,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-brand-pink rounded-full border border-brand-creme flex items-center justify-center">
-              <span className="text-brand-chocolate font-extrabold text-sm">$</span>
+              <Image src={cobraLogo} alt="" width={18} height={18} />
             </div>
             <div>
               <span className="font-extrabold text-lg tracking-tight block leading-none">CobraDora</span>
@@ -485,8 +487,10 @@ export default function LandingPage() {
           </div>
 
           <div className="flex items-center gap-6 text-sm font-semibold opacity-80">
+            <Link href="/termos-de-uso" className="hover:text-brand-pink transition-colors">Termos de Uso</Link>
             <Link href="/politica-de-privacidade" className="hover:text-brand-pink transition-colors">Privacidade</Link>
-            <a href="mailto:suporte@cobradora.com.br" className="hover:text-brand-pink transition-colors">Contato</a>
+            <Link href="/politica-de-cookies" className="hover:text-brand-pink transition-colors">Cookies</Link>
+            <a href="mailto:contato@cobradora.com.br" className="hover:text-brand-pink transition-colors">Contato</a>
           </div>
         </div>
       </footer>
