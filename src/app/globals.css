@@ -2514,6 +2514,14 @@ ul {
     grid-column: 2;
   }
 
+  .import-list {
+    /* Sem rolagem própria no mobile: rolar dentro de .modal-card (que já
+       lida com o teclado via --modal-vvh) evita duas áreas de rolagem
+       aninhadas competindo por trazer o campo focado pra vista. */
+    max-height: none;
+    overflow-y: visible;
+  }
+
   .auth-page {
     align-items: start;
     overflow-y: auto;
@@ -2842,10 +2850,6 @@ ul {
     width: 100%;
     padding-right: 10px;
     padding-left: 10px;
-  }
-
-  .import-list {
-    max-height: min(40dvh, 300px);
   }
 
   .import-row {
