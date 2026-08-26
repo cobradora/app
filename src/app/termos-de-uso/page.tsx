@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import { LegalPageShell } from "@/components/legal-page-shell";
 
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "https://www.cobradora.com.br";
-const DESCRIPTION = "Termos de Uso da CobraDora: regras de acesso, planos, cobranças, cancelamento, reembolsos e responsabilidades.";
+const DESCRIPTION = "Termos de Uso da CobraDora: regras de acesso, módulos, cobranças, cancelamento e responsabilidades.";
 
 export const metadata: Metadata = {
   title: "Termos de Uso",
   description: DESCRIPTION,
+  robots: { index: false, follow: true },
   alternates: { canonical: `${APP_BASE_URL}/termos-de-uso` },
   openGraph: {
     type: "website",
@@ -23,7 +24,8 @@ export const metadata: Metadata = {
   },
 };
 
-const LAST_UPDATED = "17 de agosto de 2026";
+const LAST_UPDATED = "24 de agosto de 2026";
+// TODO(legal): incluir CNPJ e endereço cadastral somente após confirmação dos dados oficiais.
 
 export default function TermsOfUsePage() {
   return (
@@ -32,20 +34,12 @@ export default function TermsOfUsePage() {
         Estes Termos de Uso regulam o acesso e a utilização da plataforma <strong>CobraDora</strong>, uma solução
         digital para organização e gestão de cobranças recorrentes de grupos, disponibilizada por{" "}
         <strong>Mentel Soluções Digitais</strong> (&quot;CobraDora&quot;, &quot;nós&quot; ou &quot;plataforma&quot;). Ao criar uma conta,
-        contratar um plano ou utilizar a plataforma, o usuário declara que leu e concorda com estes Termos.
+        ativar um módulo, realizar uma contratação futura ou utilizar a plataforma, o usuário declara que leu e
+        concorda com estes Termos.
       </p>
-      <div className="notice">
-        <strong>Atenção antes da publicação:</strong> complete o CNPJ e o logradouro da Mentel Soluções Digitais.
-        Esses dados devem constar de forma clara no comércio eletrônico.
-      </div>
-
       <h2>1. Identificação do fornecedor</h2>
       <p>
         <strong>Responsável:</strong> Mentel Soluções Digitais
-        <br />
-        <strong>CNPJ:</strong> [INFORMAR CNPJ]
-        <br />
-        <strong>Endereço:</strong> [INFORMAR LOGRADOURO], nº 133, sala 3, CEP 03687-010, São Paulo/SP
         <br />
         <strong>Contato:</strong> <a href="mailto:contato@cobradora.com.br">contato@cobradora.com.br</a>
       </p>
@@ -53,7 +47,7 @@ export default function TermsOfUsePage() {
       <h2>2. O que é a CobraDora</h2>
       <p>
         A CobraDora é uma ferramenta tecnológica de apoio à gestão de cobranças recorrentes. A plataforma permite,
-        entre outras funcionalidades disponibilizadas conforme o plano contratado, cadastrar grupos e participantes,
+        entre outras funcionalidades disponibilizadas conforme o módulo escolhido, cadastrar grupos e participantes,
         registrar valores e vencimentos, gerar mensagens e links de cobrança, acompanhar pagamentos e manter o
         histórico operacional.
       </p>
@@ -73,7 +67,7 @@ export default function TermsOfUsePage() {
       <h2>4. Conta, credenciais e segurança</h2>
       <ul>
         <li>O usuário é responsável pela guarda de suas credenciais e pelas atividades realizadas em sua conta.</li>
-        <li>É proibido compartilhar acesso de modo que contorne limites do plano, comprometa a segurança da plataforma ou permita uso por pessoas não autorizadas.</li>
+        <li>É proibido compartilhar acesso de modo que contorne limites do módulo, comprometa a segurança da plataforma ou permita uso por pessoas não autorizadas.</li>
         <li>Suspeitas de uso indevido, fraude ou comprometimento de credenciais devem ser comunicadas ao suporte.</li>
       </ul>
 
@@ -96,6 +90,11 @@ export default function TermsOfUsePage() {
         a utilizar esses dados para as finalidades relacionadas ao grupo e às cobranças. O tratamento de dados pela
         CobraDora segue a <a href="/politica-de-privacidade">Política de Privacidade</a>.
       </p>
+      <p>
+        Antes de habilitar o envio privado pelo WhatsApp, o organizador deve possuir autorização adequada do
+        destinatário e registrar essa confirmação na plataforma. Também deve respeitar qualquer revogação, oposição
+        ou pedido para interromper novas mensagens.
+      </p>
 
       <h2>7. Pagamentos dos participantes</h2>
       <p>
@@ -108,69 +107,66 @@ export default function TermsOfUsePage() {
         podem depender da infraestrutura e das regras do prestador de pagamento.
       </p>
 
-      <h2>8. Planos e contratação da CobraDora</h2>
+      <h2>8. Módulos Dora e CobraDora</h2>
       <p>
-        Os recursos, limites de grupos, quantidade de participantes, preços e demais condições de cada plano são
-        aqueles exibidos na página comercial no momento da contratação e integram estes Termos.
+        A plataforma oferece dois módulos de operação. No <strong>Dora</strong>, o organizador utiliza gratuitamente
+        o painel para acompanhar os pagamentos e copiar ou compartilhar as listas atualizadas. No
+        <strong>CobraDora</strong>, a plataforma acrescenta automações de comunicação, como o envio privado de
+        cobranças aos participantes e de atualizações ao organizador, quando a integração estiver configurada.
       </p>
       <p>
-        O pagamento da assinatura é processado por meio da <strong>InfinitePay</strong>. Os planos podem ser pagos
-        via Pix ou cartão de crédito, inclusive em até 12 parcelas sem juros quando essa condição estiver disponível
-        e apresentada no checkout.
-      </p>
-
-      <h2>9. Período inicial de 7 dias</h2>
-      <p>
-        Após a confirmação do pagamento, o usuário recebe <strong>7 dias de utilização gratuita</strong>. O ciclo
-        mensal ou anual contratado começa a ser contado após o encerramento desses 7 dias.
-      </p>
-      <p>
-        Sem prejuízo de direitos previstos em lei, quando aplicável a relação de consumo o usuário poderá exercer o
-        direito de arrependimento dentro do prazo legal contado da contratação. Se o cancelamento ocorrer durante o
-        período inicial de 7 dias, o valor pago será integralmente reembolsado.
+        Os recursos, limites, disponibilidade e eventuais condições comerciais de cada módulo são aqueles exibidos
+        na página comercial ou apresentados antes da ativação. A simples seleção do CobraDora no cadastro
+        <strong> não autoriza, por si só, qualquer cobrança da assinatura</strong>.
       </p>
 
-      <h2>10. Ausência de renovação automática e fidelidade</h2>
+      <h2>9. Conta InfinitePay</h2>
       <p>
-        Os planos da CobraDora <strong>não possuem renovação automática</strong> e <strong>não exigem
-        fidelidade</strong>. Ao terminar o período contratado, o usuário deverá realizar novo pagamento para
-        continuar utilizando as funcionalidades pagas.
+        Para receber as mensalidades por checkout, o organizador deve possuir uma conta InfinitePay e informar uma
+        InfiniteTag válida na plataforma. Os valores pagos pelos participantes são processados pela InfinitePay e
+        destinados à conta indicada pelo organizador.
       </p>
       <p>
-        Se não houver nova contratação ao final do ciclo, o acesso às funcionalidades do sistema será suspenso até a
-        contratação de novo período. A expiração do plano, por si só, não equivale à exclusão da conta.
+        A abertura, manutenção e utilização da conta InfinitePay estão sujeitas aos termos do próprio prestador. A
+        CobraDora não garante a aprovação cadastral da conta nem controla prazos de liquidação, disponibilidade ou
+        regras definidas pelo prestador de pagamento.
       </p>
 
-      <h2>11. Cancelamento e reembolsos</h2>
-      <h3>11.1. Durante os 7 dias iniciais</h3>
+      <h2>10. Eventual contratação do CobraDora</h2>
       <p>
-        O usuário poderá cancelar e solicitar reembolso integral do valor pago, observados também os direitos de
-        arrependimento previstos na legislação quando aplicáveis.
+        Se o CobraDora vier a ser oferecido mediante pagamento, o preço, período, forma de pagamento, eventual
+        renovação e demais condições serão informados de forma clara antes da contratação e dependerão de aceite
+        expresso do organizador.
       </p>
-      <h3>11.2. Plano mensal após o período inicial</h3>
       <p>
-        Como não há renovação automática, o plano mensal permanecerá disponível até o encerramento do ciclo
-        contratado. Após os 7 dias iniciais, não haverá reembolso proporcional pelo período já iniciado, salvo
-        quando exigido por lei ou quando decorrente de falha imputável à CobraDora que justifique restituição.
+        A cobrança das mensalidades dos participantes e a eventual cobrança comercial do módulo CobraDora são
+        operações distintas. A InfiniteTag cadastrada para receber mensalidades não será utilizada automaticamente
+        para cobrar a contratação do módulo.
       </p>
-      <h3>11.3. Plano anual após o período inicial</h3>
+
+      <h2>11. Alteração de módulo, cancelamento e reembolsos</h2>
       <p>
-        O usuário poderá solicitar o cancelamento antecipado. Nesse caso, será realizado{" "}
-        <strong>reembolso proporcional ao período pago e ainda não utilizado</strong>, descontado o período
-        efetivamente disponibilizado até a data do cancelamento. O estorno será processado pelo meio de pagamento
-        original, respeitados os prazos técnicos da instituição financeira ou do gateway.
+        O organizador poderá alterar o módulo disponível em sua conta, observadas as condições mostradas na
+        plataforma. A alteração não apaga automaticamente grupos, cobranças ou o histórico operacional, mas pode
+        interromper novas automações exclusivas do CobraDora.
+      </p>
+      <p>
+        Caso exista uma contratação paga, cancelamentos, reembolsos e o direito de arrependimento seguirão as
+        condições apresentadas no momento do aceite e a legislação aplicável. A exclusão da conta permanece uma
+        operação distinta da alteração ou desativação do módulo.
       </p>
 
       <h2>12. Exclusão da conta</h2>
       <p>
-        O organizador poderá solicitar ou realizar a exclusão diretamente pelo sistema. A exclusão removerá os
-        grupos, participantes e demais dados operacionais associados à conta, ressalvados dados e registros cuja
+        O organizador poderá solicitar a exclusão pelos canais de atendimento informados nestes Termos. Após a
+        validação do pedido, serão removidos os grupos, participantes e demais dados operacionais associados à conta,
+        ressalvados dados e registros cuja
         conservação seja necessária para cumprimento de obrigação legal ou regulatória, exercício regular de
         direitos, prevenção a fraudes, segurança ou outras hipóteses admitidas pela legislação.
       </p>
       <p>
-        A exclusão da conta é distinta da expiração de um plano. O fim do período pago suspende o acesso, mas não
-        exclui automaticamente a conta.
+        A exclusão da conta é distinta da alteração ou desativação de um módulo e não ocorre automaticamente quando
+        uma automação deixa de estar disponível.
       </p>
 
       <h2>13. Usos proibidos</h2>
@@ -205,9 +201,9 @@ export default function TermsOfUsePage() {
       <h2>16. Serviços de terceiros</h2>
       <p>
         A plataforma depende de serviços de terceiros, incluindo infraestrutura de hospedagem, banco de dados,
-        e-mail e pagamentos. Falhas exclusivamente atribuíveis a esses prestadores poderão afetar temporariamente
-        determinadas funcionalidades. Isso não afasta direitos do usuário quando a responsabilidade legal da
-        CobraDora estiver caracterizada.
+        e-mail, pagamentos e a Meta/WhatsApp para comunicações do módulo CobraDora. Falhas exclusivamente atribuíveis
+        a esses prestadores poderão afetar temporariamente determinadas funcionalidades. Isso não afasta direitos do
+        usuário quando a responsabilidade legal da CobraDora estiver caracterizada.
       </p>
 
       <h2>17. Propriedade intelectual</h2>

@@ -40,4 +40,14 @@ describe("gateway-accounts service", () => {
   it("rejeita handle com o caractere $", async () => {
     await expect(setInfinitePayHandle(organizationId, { handle: "$minha-conta" })).rejects.toThrow();
   });
+
+  it("aplica as regras públicas de formato da InfiniteTag", async () => {
+    await expect(setInfinitePayHandle(organizationId, { handle: "1conta" })).rejects.toThrow();
+    await expect(setInfinitePayHandle(organizationId, { handle: "minha conta" })).rejects.toThrow();
+    await expect(setInfinitePayHandle(organizationId, { handle: "minha_conta_extra" })).rejects.toThrow();
+    await expect(setInfinitePayHandle(organizationId, { handle: `a${"b".repeat(24)}` })).rejects.toThrow();
+
+    const account = await setInfinitePayHandle(organizationId, { handle: "Minha_conta-24" });
+    expect(account.externalAccountId).toBe("Minha_conta-24");
+  });
 });

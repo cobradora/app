@@ -78,6 +78,27 @@
       "when": 1787017306903,
       "tag": "0010_magical_nebula",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787536109272,
+      "tag": "0011_demonic_warlock",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787594715886,
+      "tag": "0012_wandering_blink",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787617366015,
+      "tag": "0013_glamorous_hulk",
+      "breakpoints": true
     }
   ]
 }

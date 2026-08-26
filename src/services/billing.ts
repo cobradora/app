@@ -9,6 +9,31 @@ import {
   renewalDateFor,
   shiftReferenceMonth,
 } from "@/lib/billing-cycle";
+import {
+  dispatchWhatsappNotifications,
+  enqueueCycleStartNotifications,
+} from "@/services/whatsapp-notifications";
+
+function generatedBillingPeriodId(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const id = (value as { id?: unknown }).id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+
+async function notifyCycleStartAfterCommit(billingPeriodId: string) {
+  try {
+    const notificationIds = await enqueueCycleStartNotifications([billingPeriodId]);
+    await dispatchWhatsappNotifications(notificationIds);
+  } catch (error) {
+    // O ciclo já foi commitado. A reconciliação do cron de WhatsApp recria a
+    // outbox ausente da competência mais recente sem transformar sucesso
+    // financeiro em erro de renovação.
+    console.error("CobraDora: ciclo gerado, mas preparo ou despacho inicial do WhatsApp falhou", {
+      billingPeriodId,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+  }
+}
 
 export async function generateBillingPeriod(
   organizationId: string,
@@ -67,7 +92,10 @@ export async function generateBillingPeriod(
         );
       if (!existing) throw new Error("Falha ao recuperar ciclo já gerado");
       period = existing;
-      eligibilityCutoff = todayInBillingTimeZone(now);
+      // O corte móvel é uma regra exclusiva da renovação manual. Em ciclos
+      // automáticos (inclusive numa corrida entre dois crons), conservar o
+      // vencimento histórico evita cobrar retroativamente quem entrou depois.
+      eligibilityCutoff = group.billingDay === null ? todayInBillingTimeZone(now) : existing.dueDate;
     }
 
     const eligibleParticipants = await tx
@@ -190,14 +218,19 @@ export async function generateDueBillingPeriods(
       const lastDueReference = local.day >= group.billingDay ? current : shiftReferenceMonth(current, -1);
       let next = latest ? shiftReferenceMonth(latest.referenceMonth, 1) : lastDueReference;
       let safety = 0;
+      let latestGeneratedPeriodId: string | null = null;
 
       while (next <= lastDueReference && safety < 120) {
         attemptedReferenceMonth = next;
-        await generatePeriod(group.organizationId, group.id, next);
+        const generatedPeriod = await generatePeriod(group.organizationId, group.id, next);
         generated.push({ groupId: group.id, referenceMonth: next });
+        latestGeneratedPeriodId = generatedBillingPeriodId(generatedPeriod) ?? latestGeneratedPeriodId;
         next = shiftReferenceMonth(next, 1);
         safety += 1;
       }
+      // Catch-up histórico pode criar muitas competências. Só a mais recente
+      // representa o início operacional atual e deve gerar templates agora.
+      if (latestGeneratedPeriodId) await notifyCycleStartAfterCommit(latestGeneratedPeriodId);
     } catch (error) {
       logCronGroupFailure(group.id, attemptedReferenceMonth, error);
       failures.push({
@@ -249,5 +282,10 @@ export async function renewGroupCycleManually(organizationId: string, groupId: s
 
   const referenceMonth = currentReferenceMonth(now);
   const dueDate = todayInBillingTimeZone(now);
-  return generateBillingPeriod(organizationId, groupId, referenceMonth, { dueDate }, now);
+  const period = await generateBillingPeriod(organizationId, groupId, referenceMonth, { dueDate }, now);
+  // Repetir a renovação pode acrescentar charges de participantes que
+  // entraram depois do primeiro clique. A revisão idempotente da outbox
+  // decide se existe algo novo a comunicar e evita reenvio sem mudança.
+  await notifyCycleStartAfterCommit(period.id);
+  return period;
 }

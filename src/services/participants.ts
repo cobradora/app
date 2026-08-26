@@ -60,6 +60,9 @@ const participantFields = z.object({
     .string()
     .max(PHONE_INPUT_MAX_LENGTH)
     .refine(validPhone, "Informe um celular brasileiro válido com DDD"),
+  // Opt-in explícito do responsável financeiro para templates iniciados pela
+  // plataforma. Ausente preserva o consentimento atual do telefone.
+  whatsappConsent: z.boolean().optional(),
 });
 
 /** R$ 1.000.000,00 em centavos: teto defensivo para entrada administrativa. */
@@ -111,18 +114,45 @@ async function upsertFinancialContact(
   tx: TransactionClient,
   organizationId: string,
   rawPhone: string,
+  whatsappConsent?: boolean,
 ) {
   const phone = parsePhoneBR(rawPhone);
+  const consentChangedAt = new Date();
+  const consentInsertValues =
+    whatsappConsent === true
+      // Um novo opt-in torna o consentimento ativo por ser posterior ao
+      // opt-out, mas preserva a data da oposição anterior para auditoria.
+      ? { whatsappOptInAt: consentChangedAt }
+      : whatsappConsent === false
+        ? { whatsappOptOutAt: consentChangedAt }
+        : {};
+  const consentUpdateValues =
+    whatsappConsent === true
+      ? {
+          whatsappOptInAt: sql<Date>`greatest(
+            ${consentChangedAt},
+            coalesce(${financialContacts.whatsappOptOutAt} + interval '1 millisecond', ${consentChangedAt})
+          )`,
+        }
+      : whatsappConsent === false
+        ? {
+            whatsappOptOutAt: sql<Date>`greatest(
+              ${consentChangedAt},
+              coalesce(${financialContacts.whatsappOptInAt} + interval '1 millisecond', ${consentChangedAt})
+            )`,
+          }
+        : {};
   const [contact] = await tx
     .insert(financialContacts)
     .values({
       organizationId,
       phoneNormalized: phone.normalized,
       phoneDisplay: phone.display,
+      ...consentInsertValues,
     })
     .onConflictDoUpdate({
       target: [financialContacts.organizationId, financialContacts.phoneNormalized],
-      set: { phoneDisplay: phone.display, updatedAt: new Date() },
+      set: { phoneDisplay: phone.display, updatedAt: new Date(), ...consentUpdateValues },
     })
     .returning();
 
@@ -240,6 +270,8 @@ export async function listGroupParticipants(organizationId: string, groupId: str
       financialRole: participants.financialRole,
       name: participants.name,
       phoneDisplay: financialContacts.phoneDisplay,
+      whatsappOptInAt: financialContacts.whatsappOptInAt,
+      whatsappOptOutAt: financialContacts.whatsappOptOutAt,
       billingStartsOn: groupParticipants.billingStartsOn,
       billingAmount: groupParticipants.billingAmount,
       tag: groupParticipants.tag,
@@ -316,7 +348,7 @@ export async function addParticipantToGroup(
       if (!cycle) return null;
       await assertNameAvailable(tx, groupId, nameNormalized);
 
-      const contact = await upsertFinancialContact(tx, organizationId, input.phone);
+      const contact = await upsertFinancialContact(tx, organizationId, input.phone, input.whatsappConsent);
       await lockContacts(tx, [contact.id]);
       const financialRole = await nextFinancialRole(tx, contact.id);
       const [participant] = await tx
@@ -348,6 +380,8 @@ export async function addParticipantToGroup(
           ...participant,
           phoneNormalized: contact.phoneNormalized,
           phoneDisplay: contact.phoneDisplay,
+          whatsappOptInAt: contact.whatsappOptInAt,
+          whatsappOptOutAt: contact.whatsappOptOutAt,
         },
         startsNextCycle: cycle.startsNextCycle,
         nextCycleReferenceMonth: cycle.referenceMonth,
@@ -649,7 +683,12 @@ export async function updateParticipant(
         if (activeCheckout) throw new ParticipantCheckoutInProgressError();
       }
 
-      const targetContact = await upsertFinancialContact(tx, organizationId, phone.normalized);
+      const targetContact = await upsertFinancialContact(
+        tx,
+        organizationId,
+        phone.normalized,
+        input.whatsappConsent,
+      );
       await lockContacts(tx, [current.financialContactId, targetContact.id]);
 
       let financialRole = current.financialRole;
@@ -693,6 +732,8 @@ export async function updateParticipant(
         ...updated,
         phoneNormalized: targetContact.phoneNormalized,
         phoneDisplay: targetContact.phoneDisplay,
+        whatsappOptInAt: targetContact.whatsappOptInAt,
+        whatsappOptOutAt: targetContact.whatsappOptOutAt,
       };
     });
   } catch (error) {

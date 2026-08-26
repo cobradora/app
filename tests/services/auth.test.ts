@@ -21,6 +21,8 @@ describe("auth service", () => {
 
     expect(result).not.toBeNull();
     expect(result!.organization.name).toBe("Arena Nova");
+    expect(result!.organization.billingModule).toBe("dora");
+    expect(result!.organization.organizerPhoneNormalized).toBeNull();
     expect(result!.user.email).toBe("lucas@arenanova.com.br");
     expect(result!.user.role).toBe("owner");
     expect(result!.user.organizationId).toBe(result!.organization.id);
@@ -28,6 +30,35 @@ describe("auth service", () => {
 
     const ok = await verifyPassword("senha-forte-123", result!.user.passwordHash!);
     expect(ok).toBe(true);
+  });
+
+  it("exige o WhatsApp do organizador ao cadastrar no modulo CobraDora", async () => {
+    await expect(
+      signUp({
+        organizationName: "Arena Automatizada",
+        name: "Marina Costa",
+        email: "marina@arenaautomatizada.com.br",
+        password: "senha-forte-123",
+        billingModule: "cobradora",
+      }),
+    ).rejects.toThrow(/WhatsApp do organizador/);
+
+    expect(await db.select().from(users)).toHaveLength(0);
+  });
+
+  it("normaliza o WhatsApp ao cadastrar no modulo CobraDora", async () => {
+    const result = await signUp({
+      organizationName: "Arena Automatizada",
+      name: "Marina Costa",
+      email: "marina@arenaautomatizada.com.br",
+      password: "senha-forte-123",
+      billingModule: "cobradora",
+      organizerPhone: "(11) 98812-4410",
+    });
+
+    expect(result!.organization.billingModule).toBe("cobradora");
+    expect(result!.organization.organizerPhoneNormalized).toBe("+5511988124410");
+    expect(result!.organization.organizerPhoneDisplay).toBe("(11) 98812-4410");
   });
 
   it("rejeita cadastro com email ja usado, retornando null", async () => {

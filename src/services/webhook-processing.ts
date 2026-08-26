@@ -14,6 +14,10 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { getPaymentsAdapter } from "@/payments";
 import { matchesCheckoutToken } from "@/payments/session-tokens";
 import { z } from "zod";
+import {
+  dispatchWhatsappNotifications,
+  enqueueOrganizerListUpdates,
+} from "@/services/whatsapp-notifications";
 
 export class InvalidWebhookSignatureError extends Error {
   constructor(message = "Token do webhook InfinitePay inválido") {
@@ -86,7 +90,7 @@ type ConfirmPaymentInput = {
  */
 export async function confirmInfinitePayPayment(
   input: ConfirmPaymentInput,
-): Promise<{ alreadyProcessed: boolean; paymentId: string }> {
+): Promise<{ alreadyProcessed: boolean; paymentId: string; notificationIds: string[] }> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`select id from checkout_sessions where id = ${input.sessionId} for update`);
     const [session] = await tx.select().from(checkoutSessions).where(eq(checkoutSessions.id, input.sessionId));
@@ -115,7 +119,7 @@ export async function confirmInfinitePayPayment(
           .set({ processingStatus: "processed", processedAt: new Date(), errorMessage: null })
           .where(eq(webhookEvents.id, input.webhookEventId));
       }
-      return { alreadyProcessed: true, paymentId: existingPayment.id };
+      return { alreadyProcessed: true, paymentId: existingPayment.id, notificationIds: [] };
     }
 
     const expiredButReconcilable =
@@ -135,7 +139,7 @@ export async function confirmInfinitePayPayment(
 
     const itemChargeIds = items.map((item) => item.chargeId);
     const currentCharges = await tx
-      .select({ id: charges.id, status: charges.status })
+      .select({ id: charges.id, status: charges.status, billingPeriodId: charges.billingPeriodId })
       .from(charges)
       .where(inArray(charges.id, itemChargeIds));
     const acceptableChargeStatuses = expiredButReconcilable
@@ -236,7 +240,13 @@ export async function confirmInfinitePayPayment(
         .where(eq(webhookEvents.id, input.webhookEventId));
     }
 
-    return { alreadyProcessed: false, paymentId: payment.id };
+    const notificationIds = await enqueueOrganizerListUpdates(tx, {
+      organizationId: session.organizationId,
+      paymentId: payment.id,
+      billingPeriodIds: currentCharges.map((charge) => charge.billingPeriodId),
+    });
+
+    return { alreadyProcessed: false, paymentId: payment.id, notificationIds };
   });
 }
 
@@ -316,6 +326,12 @@ export async function processInfinitePayWebhook(
       paymentMethod: payload.capture_method ?? null,
       source: "webhook",
       webhookEventId: event.id,
+    });
+    await dispatchWhatsappNotifications(result.notificationIds).catch((dispatchError) => {
+      console.error("CobraDora: pagamento confirmado, mas despacho ao organizador falhou", {
+        paymentId: result.paymentId,
+        errorName: dispatchError instanceof Error ? dispatchError.name : "UnknownError",
+      });
     });
     return { alreadyProcessed: result.alreadyProcessed };
   } catch (error) {
@@ -400,6 +416,12 @@ export async function checkInfinitePayPayment(input: {
     amount: checked.amount,
     paymentMethod: checked.paymentMethod,
     source: "payment_check",
+  });
+  await dispatchWhatsappNotifications(confirmed.notificationIds).catch((dispatchError) => {
+    console.error("CobraDora: pagamento confirmado, mas despacho ao organizador falhou", {
+      paymentId: confirmed.paymentId,
+      errorName: dispatchError instanceof Error ? dispatchError.name : "UnknownError",
+    });
   });
   return { status: "confirmed", alreadyProcessed: confirmed.alreadyProcessed };
 }

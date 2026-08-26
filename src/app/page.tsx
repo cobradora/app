@@ -7,24 +7,24 @@ import LandingPage from "@/components/landing-page";
 
 const APP_BASE_URL = process.env.APP_BASE_URL ?? "https://www.cobradora.com.br";
 const DESCRIPTION =
-  "Organize mensalidades e cobranças recorrentes de grupos com a CobraDora. Cadastre participantes, gere links de cobrança e acompanhe pagamentos em um só lugar.";
+  "Escolha como cobrar seu grupo: use a Dora grátis para organizar e compartilhar listas ou a CobraDora para automatizar cobranças privadas e atualizações.";
 
 export const metadata: Metadata = {
-  title: "CobraDora — Organize as cobranças do seu grupo de WhatsApp",
+  title: "Dora ou CobraDora — Escolha como cobrar seu grupo",
   description: DESCRIPTION,
   alternates: { canonical: `${APP_BASE_URL}/` },
   openGraph: {
     type: "website",
     locale: "pt_BR",
     siteName: "CobraDora",
-    title: "CobraDora — Organize as cobranças do seu grupo",
-    description: "Cadastre participantes, organize mensalidades, gere links de cobrança e acompanhe pagamentos sem depender de planilhas.",
+    title: "Dora ou CobraDora — Cobranças no seu ritmo",
+    description: "Controle grátis pelo painel ou automatize cobranças privadas e atualizações para o organizador.",
     url: `${APP_BASE_URL}/`,
   },
   twitter: {
     card: "summary",
-    title: "CobraDora — Assistente de Cobranças",
-    description: "Controle mensalidades e cobranças recorrentes do seu grupo em um só lugar.",
+    title: "Dora ou CobraDora — Assistente de Cobranças",
+    description: "Escolha entre controle manual gratuito e cobrança automatizada para seus grupos.",
   },
 };
 
@@ -45,15 +45,15 @@ const JSON_LD = {
       applicationCategory: "BusinessApplication",
       operatingSystem: "Web",
       url: `${APP_BASE_URL}/`,
-      description: "Plataforma para organização e gestão de cobranças recorrentes de grupos.",
+      description: "Plataforma com módulo gratuito para controle pelo painel e módulo de automação para cobranças privadas.",
       publisher: { "@id": `${APP_BASE_URL}/#organization` },
-      offers: {
-        "@type": "AggregateOffer",
-        priceCurrency: "BRL",
-        lowPrice: "14.90",
-        highPrice: "99.90",
-        offerCount: "3",
-      },
+      isAccessibleForFree: true,
+      featureList: [
+        "Painel de mensalidades e pendências",
+        "Checkout com InfinitePay",
+        "Lista para copiar ou compartilhar",
+        "Cobranças privadas automatizadas no módulo CobraDora",
+      ],
     },
   ],
 };

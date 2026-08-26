@@ -10,6 +10,7 @@ import {
   checkoutSessions,
   webhookEvents,
   auditEvents,
+  whatsappNotifications,
 } from "@/db/schema";
 import { findOrCreateParticipantByPhone, linkParticipantToGroup } from "@/services/participants";
 import { generateBillingPeriod } from "@/services/billing";
@@ -88,6 +89,8 @@ describe("processInfinitePayWebhook", () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   async function setupCheckoutSession(idempotencyKey: string) {
@@ -193,9 +196,27 @@ describe("processInfinitePayWebhook", () => {
   });
 
   it("webhook repetido (mesmo transaction_nsu) e idempotente e nao duplica payments/allocations", async () => {
+    await db
+      .update(organizations)
+      .set({
+        billingModule: "cobradora",
+        organizerPhoneNormalized: "+5511988887777",
+        organizerPhoneDisplay: "(11) 98888-7777",
+      })
+      .where(eq(organizations.id, organizationId));
     const { checkoutSessionId, totalChargesAmount, webhookToken } = await setupCheckoutSession(
       "idem-webhook-repetido",
     );
+
+    vi.stubEnv("WHATSAPP_ACCESS_TOKEN", "token-meta-teste");
+    vi.stubEnv("WHATSAPP_PHONE_NUMBER_ID", "phone-id-teste");
+    vi.stubEnv("WHATSAPP_ORGANIZER_UPDATE_TEMPLATE_NAME", "lista_atualizada_teste");
+    const metaFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ messages: [{ id: "wamid.organizador-teste" }] }),
+      text: async () => "",
+    });
+    global.fetch = metaFetch as unknown as typeof fetch;
 
     const rawBody = buildRawBody(checkoutSessionId, "txn-repetido-1", totalChargesAmount);
 
@@ -216,6 +237,18 @@ describe("processInfinitePayWebhook", () => {
 
     const events = await db.select().from(webhookEvents).where(eq(webhookEvents.externalEventId, "txn-repetido-1"));
     expect(events).toHaveLength(1);
+
+    const notifications = await db.select().from(whatsappNotifications);
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toEqual(
+      expect.objectContaining({
+        kind: "organizer_list_update",
+        status: "sent",
+        recipientPhoneNormalized: "+5511988887777",
+        metaMessageId: "wamid.organizador-teste",
+      }),
+    );
+    expect(metaFetch).toHaveBeenCalledTimes(1);
   });
 
   it("webhook tardio reconcilia sessao vinculada expirada sem criar um segundo checkout", async () => {

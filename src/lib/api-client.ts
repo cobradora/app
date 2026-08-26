@@ -54,11 +54,20 @@ export type LoginInput = {
   password: string;
 };
 
+export type BillingModule = "dora" | "cobradora";
+
+export type BillingModuleSettings = {
+  billingModule: BillingModule;
+  organizerPhone: string | null;
+};
+
 export type SignupInput = {
   organizationName: string;
   name: string;
   email: string;
   password: string;
+  billingModule?: BillingModule;
+  organizerPhone?: string | null;
 };
 
 export type CreateGroupInput = {
@@ -81,6 +90,8 @@ export type AddParticipantInput = {
   billingAmount?: number;
   /** Categoria livre (opcional), usada só para ordenar a mensagem de cobrança. */
   tag?: string;
+  /** Confirmação explícita do organizador para cobranças privadas via WhatsApp. */
+  whatsappConsent?: boolean;
 };
 
 export type UpdateGroupInput = {
@@ -96,6 +107,7 @@ export type UpdateGroupInput = {
 export type UpdateParticipantInput = {
   name: string;
   phone: string;
+  whatsappConsent?: boolean;
 };
 
 export type CheckoutResult = {
@@ -112,14 +124,19 @@ export type CheckoutPaymentStatus = {
   alreadyProcessed: boolean;
 };
 
+export type ParticipantContactDetails = {
+  id: string;
+  financialContactId: string;
+  name: string;
+  phoneNormalized: string;
+  phoneDisplay: string;
+  financialRole: "responsible" | "dependent";
+  whatsappOptInAt?: string | null;
+  whatsappOptOutAt?: string | null;
+};
+
 export type AddParticipantResult = {
-  participant: {
-    id: string;
-    name: string;
-    phoneNormalized: string;
-    phoneDisplay: string;
-    financialRole: "responsible" | "dependent";
-  };
+  participant: ParticipantContactDetails;
   startsNextCycle: boolean;
   nextCycleReferenceMonth: string;
 };
@@ -156,12 +173,15 @@ export type OrgCharge = GroupCharge & {
 
 export type GroupParticipant = {
   participantId: string;
+  financialContactId: string;
   name: string;
   phoneDisplay: string;
   /** Valor individual deste vinculo com o grupo, em centavos. */
   billingAmount: number;
   /** Categoria livre deste vinculo com o grupo (null = sem tag). */
   tag: string | null;
+  whatsappOptInAt?: string | null;
+  whatsappOptOutAt?: string | null;
 };
 
 export type ListGroupParticipantsResult = {
@@ -219,6 +239,21 @@ export const apiClient = {
       body: JSON.stringify({ handle }),
     });
     return data.account;
+  },
+
+  /** GET /api/settings/billing-module — módulo de cobrança e telefone do organizador. */
+  async getBillingModuleSettings() {
+    const data = await request<{ settings: BillingModuleSettings }>("/api/settings/billing-module", { method: "GET" });
+    return data.settings;
+  },
+
+  /** PATCH /api/settings/billing-module — altera o modo operacional da organização. */
+  async updateBillingModuleSettings(input: BillingModuleSettings) {
+    const data = await request<{ settings: BillingModuleSettings }>("/api/settings/billing-module", {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+    return data.settings;
   },
 
   /** POST /api/auth/logout — limpa o cookie de sessao. */
@@ -342,7 +377,7 @@ export const apiClient = {
 
   /** PATCH /api/participants/:participantId */
   async updateParticipant(participantId: string, input: UpdateParticipantInput) {
-    const data = await request<{ participant: unknown }>(`/api/participants/${participantId}`, {
+    const data = await request<{ participant: ParticipantContactDetails }>(`/api/participants/${participantId}`, {
       method: "PATCH",
       body: JSON.stringify(input),
     });

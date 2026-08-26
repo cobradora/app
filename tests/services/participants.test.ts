@@ -8,6 +8,7 @@ import {
   groupParticipants,
   checkoutSessions,
   checkoutItems,
+  financialContacts,
 } from "@/db/schema";
 import {
   addParticipantToGroup,
@@ -52,6 +53,40 @@ describe("participants service", () => {
     expect(second.financialContactId).toBe(first.financialContactId);
     expect(first.financialRole).toBe("responsible");
     expect(second.financialRole).toBe("dependent");
+  });
+
+  it("preserva o histórico de oposição ao registrar um novo opt-in no mesmo contato", async () => {
+    const participant = await addParticipantToGroup(
+      organizationId,
+      groupId,
+      { name: "Marina Costa", phone: "(11) 98812-4410", whatsappConsent: true },
+      new Date("2026-08-01T12:00:00Z"),
+    );
+    await updateParticipant(organizationId, participant!.participant.id, {
+      name: "Marina Costa",
+      phone: "(11) 98812-4410",
+      whatsappConsent: false,
+    });
+    const [opposed] = await db
+      .select()
+      .from(financialContacts)
+      .where(eq(financialContacts.id, participant!.participant.financialContactId));
+    expect(opposed.whatsappOptInAt).not.toBeNull();
+    expect(opposed.whatsappOptOutAt).not.toBeNull();
+    const oppositionAt = opposed.whatsappOptOutAt;
+
+    await updateParticipant(organizationId, participant!.participant.id, {
+      name: "Marina Costa",
+      phone: "(11) 98812-4410",
+      whatsappConsent: true,
+    });
+    const [reconsented] = await db
+      .select()
+      .from(financialContacts)
+      .where(eq(financialContacts.id, participant!.participant.financialContactId));
+
+    expect(reconsented.whatsappOptOutAt).toEqual(oppositionAt);
+    expect(reconsented.whatsappOptInAt!.getTime()).toBeGreaterThan(oppositionAt!.getTime());
   });
 
   it("sair do grupo preserva o vinculo antigo e permite reentrada (RB-018)", async () => {

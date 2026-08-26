@@ -5,6 +5,7 @@ const TABLES = [
   "rate_limit_hits",
   "audit_events",
   "webhook_events",
+  "whatsapp_notifications",
   "commissions",
   "gateway_accounts",
   "payment_allocations",

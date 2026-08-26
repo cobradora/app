@@ -8,6 +8,7 @@ const DESCRIPTION =
 export const metadata: Metadata = {
   title: "Política de Privacidade",
   description: DESCRIPTION,
+  robots: { index: false, follow: true },
   alternates: { canonical: `${APP_BASE_URL}/politica-de-privacidade` },
   openGraph: {
     type: "website",
@@ -24,7 +25,8 @@ export const metadata: Metadata = {
   },
 };
 
-const LAST_UPDATED = "17 de agosto de 2026";
+const LAST_UPDATED = "24 de agosto de 2026";
+// TODO(legal): incluir CNPJ e endereço cadastral somente após confirmação dos dados oficiais.
 
 export default function PrivacyPolicyPage() {
   return (
@@ -35,27 +37,20 @@ export default function PrivacyPolicyPage() {
         participantes da plataforma, em conformidade com a Lei Geral de Proteção de Dados Pessoais — LGPD (Lei nº
         13.709/2018).
       </p>
-      <div className="notice">
-        <strong>Atenção antes da publicação:</strong> a versão pública anterior indicava Athrios Soluções como
-        responsável. Esta versão substitui essa identificação por Mentel Soluções Digitais. Complete também o CNPJ e
-        o logradouro nos Termos de Uso.
-      </div>
-
       <h2>1. Quem é o responsável pelo tratamento</h2>
       <p>
         <strong>Mentel Soluções Digitais</strong>
-        <br />
-        Endereço cadastral: [INFORMAR LOGRADOURO], nº 133, sala 3, CEP 03687-010, São Paulo/SP
         <br />
         Contato de privacidade: <a href="mailto:contato@cobradora.com.br">contato@cobradora.com.br</a>
       </p>
 
       <h2>2. Quais dados coletamos</h2>
       <ul>
-        <li><strong>Dados do organizador:</strong> nome, e-mail, senha protegida por hash e demais informações fornecidas no cadastro.</li>
-        <li><strong>Dados dos participantes:</strong> nome e número de celular, inseridos pelo organizador ou fornecidos pelo próprio participante ao utilizar um link público disponibilizado pela plataforma.</li>
+        <li><strong>Dados do organizador:</strong> nome, e-mail, telefone de WhatsApp quando informado, senha protegida por hash e demais informações fornecidas no cadastro.</li>
+        <li><strong>Dados dos participantes:</strong> nome, número de celular e registros relacionados à autorização ou oposição ao recebimento de mensagens, inseridos pelo organizador ou fornecidos pelo próprio participante ao utilizar a plataforma.</li>
         <li><strong>Dados de cobranças:</strong> grupo relacionado, competência, valor, vencimento, status, forma de pagamento, comprovantes e histórico operacional.</li>
-        <li><strong>Dados da assinatura do organizador:</strong> plano, período contratado, status da contratação, identificadores de transação e informações necessárias à conciliação. Dados completos de cartão são processados pelo prestador de pagamento e não precisam ser armazenados pela CobraDora.</li>
+        <li><strong>Dados do módulo:</strong> módulo Dora ou CobraDora selecionado, configurações de automação, histórico de alterações e, quando houver contratação paga, informações necessárias à sua administração.</li>
+        <li><strong>Dados de mensagens:</strong> destinatário, tipo de comunicação, identificador fornecido pela Meta, tentativas e estados como enviado, entregue, lido ou falhou.</li>
         <li><strong>Dados técnicos:</strong> informações de sessão e registros técnicos necessários à segurança, funcionamento e cumprimento de obrigações legais aplicáveis.</li>
         <li><strong>Cookie de sessão:</strong> <code>cobradora_session</code>, necessário para manter o organizador autenticado, com validade de até 30 dias e configuração httpOnly.</li>
       </ul>
@@ -66,8 +61,8 @@ export default function PrivacyPolicyPage() {
         <li>criar e administrar grupos e participantes;</li>
         <li>gerar, organizar e acompanhar cobranças recorrentes;</li>
         <li>processar e conciliar pagamentos realizados por integrações disponibilizadas na plataforma;</li>
-        <li>administrar a assinatura da CobraDora e o período contratado;</li>
-        <li>enviar comunicações transacionais, inclusive redefinição de senha e informações de serviço;</li>
+        <li>administrar o módulo selecionado e, quando aplicável, sua contratação;</li>
+        <li>enviar comunicações transacionais, inclusive redefinição de senha, cobranças privadas aos participantes e atualizações de pagamento ao organizador;</li>
         <li>prevenir fraude, abuso e incidentes de segurança;</li>
         <li>cumprir obrigações legais, regulatórias, fiscais, contábeis ou determinações de autoridades competentes;</li>
         <li>exercer ou defender direitos em processos judiciais, administrativos ou arbitrais.</li>
@@ -92,6 +87,7 @@ export default function PrivacyPolicyPage() {
       <p>Não vendemos dados pessoais. Compartilhamos informações somente quando necessário para operar a plataforma ou cumprir obrigações aplicáveis, inclusive com:</p>
       <ul>
         <li><strong>InfinitePay:</strong> processamento de pagamentos e checkout;</li>
+        <li><strong>Meta/WhatsApp:</strong> envio e acompanhamento das comunicações transacionais do módulo CobraDora;</li>
         <li><strong>Resend:</strong> envio de e-mails transacionais;</li>
         <li><strong>Supabase:</strong> infraestrutura de banco de dados e serviços relacionados;</li>
         <li><strong>Vercel:</strong> hospedagem e entrega da aplicação web;</li>
@@ -138,9 +134,10 @@ export default function PrivacyPolicyPage() {
 
       <h2>10. Exclusão da conta</h2>
       <p>
-        O organizador consegue solicitar a exclusão diretamente no sistema. A exclusão remove os dados operacionais
-        da conta, grupos e participantes, ressalvados os registros que devam permanecer armazenados por obrigação
-        legal, regulatória, segurança, prevenção à fraude ou exercício regular de direitos.
+        O organizador pode solicitar a exclusão pelo contato de privacidade informado nesta Política. Após a
+        validação do pedido, serão removidos os dados operacionais da conta, grupos e participantes, ressalvados os
+        registros que devam permanecer armazenados por obrigação legal, regulatória, segurança, prevenção à fraude
+        ou exercício regular de direitos.
       </p>
 
       <h2>11. Segurança</h2>
@@ -160,7 +157,9 @@ export default function PrivacyPolicyPage() {
       <h2>13. Crianças e adolescentes</h2>
       <p>
         A conta de organizador é destinada a pessoas com <strong>18 anos ou mais</strong>. A plataforma não deve ser
-        utilizada para criar conta de organizador em nome de menor de idade.
+        utilizada para criar conta de organizador em nome de menor de idade. Quando um grupo incluir crianças ou
+        adolescentes, o organizador é responsável por assegurar a participação do responsável legal e uma base
+        adequada para o tratamento, observando o melhor interesse do menor e evitando dados desnecessários.
       </p>
 
       <h2>14. Alterações desta Política</h2>

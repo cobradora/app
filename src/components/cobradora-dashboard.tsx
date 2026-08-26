@@ -17,6 +17,7 @@ import {
   KeyRound,
   Link2,
   LogOut,
+  MessageCircleMore,
   Pencil,
   Plus,
   RotateCw,
@@ -33,17 +34,25 @@ import cobraLogo from "@/images/logo-cobra-sem-fundo.png";
 import { Spinner } from "@/components/spinner";
 import {
   apiClient,
+  type BillingModule,
+  type BillingModuleSettings,
   type GatewayAccount,
   type GroupCharge,
   type GroupParticipant,
   type ManualSettlementInput,
   type OrgCharge,
+  type ParticipantContactDetails,
 } from "@/lib/api-client";
 import { formatDate, formatMoney, type Group, type Participant } from "@/lib/mock-data";
 
 type DashboardUser = { name: string; role: "owner" | "admin" | "member" };
-type ImportRow = { id: string; name: string; include: boolean; phone: string; error: string };
-type DashboardParticipant = Participant & { billingAmounts: Record<string, number>; tags: Record<string, string> };
+type ImportRow = { id: string; name: string; include: boolean; phone: string; whatsappConsent: boolean; error: string };
+type DashboardParticipant = Participant & {
+  financialContactId: string;
+  billingAmounts: Record<string, number>;
+  tags: Record<string, string>;
+  whatsappConsent: boolean;
+};
 type RawChargeStatus = GroupCharge["status"];
 type DashboardCharge = {
   id: string;
@@ -71,9 +80,12 @@ type ApiGroup = {
 type ParticipantEnvelope = {
   participant?: {
     id?: string;
+    financialContactId?: string;
     name?: string;
     phoneDisplay?: string;
     phone?: string;
+    whatsappOptInAt?: string | null;
+    whatsappOptOutAt?: string | null;
   };
   startsNextCycle?: boolean;
   nextCycleReferenceMonth?: string | null;
@@ -157,15 +169,26 @@ function mapOrgCharge(row: OrgCharge): DashboardCharge {
   return mapRealCharge(row, row.groupId);
 }
 
+function hasActiveWhatsappConsent(input: {
+  whatsappOptInAt?: string | null;
+  whatsappOptOutAt?: string | null;
+}): boolean {
+  if (!input.whatsappOptInAt) return false;
+  if (!input.whatsappOptOutAt) return true;
+  return Date.parse(input.whatsappOptInAt) > Date.parse(input.whatsappOptOutAt);
+}
+
 function mapGroupParticipant(row: GroupParticipant, groupId: string): DashboardParticipant {
   return {
     id: row.participantId,
+    financialContactId: row.financialContactId,
     name: row.name,
     initials: (row.name || "?").slice(0, 2).toUpperCase(),
     phone: row.phoneDisplay,
     groupIds: [groupId],
     billingAmounts: { [groupId]: row.billingAmount },
     tags: { [groupId]: row.tag ?? "" },
+    whatsappConsent: hasActiveWhatsappConsent(row),
   };
 }
 
@@ -247,11 +270,19 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   const [gatewayInput, setGatewayInput] = useState("");
   const [gatewaySaving, setGatewaySaving] = useState(false);
   const [gatewayError, setGatewayError] = useState("");
+  const [gatewayLoading, setGatewayLoading] = useState(true);
+
+  const [billingSettings, setBillingSettings] = useState<BillingModuleSettings | null>(null);
+  const [billingSettingsLoading, setBillingSettingsLoading] = useState(true);
+  const [billingModuleDraft, setBillingModuleDraft] = useState<BillingModule>("dora");
+  const [organizerPhoneInput, setOrganizerPhoneInput] = useState("");
+  const [billingSettingsSaving, setBillingSettingsSaving] = useState(false);
+  const [billingSettingsError, setBillingSettingsError] = useState("");
 
   const [mobileTab, setMobileTab] = useState<"home" | "grupos" | "pendencias" | "ajustes">("home");
 
   const [memberModal, setMemberModal] = useState(false);
-  const [memberForm, setMemberForm] = useState({ name: "", phone: "", billingAmount: "", tag: "" });
+  const [memberForm, setMemberForm] = useState({ name: "", phone: "", billingAmount: "", tag: "", whatsappConsent: false });
   const [memberSaving, setMemberSaving] = useState(false);
   const [memberError, setMemberError] = useState("");
 
@@ -279,7 +310,8 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   const [renewingCycle, setRenewingCycle] = useState(false);
 
   const [participantModal, setParticipantModal] = useState<null | { groupId: string; participantId: string }>(null);
-  const [participantEditForm, setParticipantEditForm] = useState({ name: "", phone: "", billingAmount: "", tag: "" });
+  const [participantEditForm, setParticipantEditForm] = useState({ name: "", phone: "", billingAmount: "", tag: "", whatsappConsent: false });
+  const [participantConsentTouched, setParticipantConsentTouched] = useState(false);
   const [participantSaving, setParticipantSaving] = useState(false);
   const [participantError, setParticipantError] = useState("");
 
@@ -350,12 +382,26 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
             name: person.name,
             initials: person.initials,
             phone: person.phone,
+            financialContactId: person.financialContactId,
+            whatsappConsent: person.whatsappConsent,
             groupIds: Array.from(new Set([...existing.groupIds, groupId])),
             billingAmounts: { ...existing.billingAmounts, ...person.billingAmounts },
             tags: { ...existing.tags, ...person.tags },
           }
         : person,
     );
+
+    // O consentimento pertence ao contato financeiro (telefone), não a um
+    // participante isolado. Mantemos todos os registros já carregados em
+    // sincronia quando um novo dependente atualiza esse estado compartilhado.
+    for (const [participantId, participant] of map) {
+      if (
+        participant.financialContactId === person.financialContactId &&
+        participant.whatsappConsent !== person.whatsappConsent
+      ) {
+        map.set(participantId, { ...participant, whatsappConsent: person.whatsappConsent });
+      }
+    }
   }
 
   function upsertParticipant(person: DashboardParticipant, groupId: string) {
@@ -421,6 +467,9 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       })
       .catch(() => {
         if (!cancelled) flash("Não foi possível carregar a conta InfinitePay.");
+      })
+      .finally(() => {
+        if (!cancelled) setGatewayLoading(false);
       });
     return () => {
       cancelled = true;
@@ -429,18 +478,58 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
 
   useEffect(() => {
     let cancelled = false;
-    apiClient
-      .listOrganizationCharges(competence)
-      .then((rows) => {
+    let requestRunning = false;
+
+    async function refreshPeriodCharges(showError: boolean) {
+      if (requestRunning) return;
+      requestRunning = true;
+      try {
+        const rows = await apiClient.listOrganizationCharges(competence);
         if (!cancelled) mergeCharges(rows.map(mapOrgCharge));
+      } catch {
+        if (!cancelled && showError) flash("Não foi possível carregar as cobranças do mês.");
+      } finally {
+        requestRunning = false;
+      }
+    }
+
+    void refreshPeriodCharges(true);
+    const intervalId = window.setInterval(() => void refreshPeriodCharges(false), 30_000);
+    const refreshOnFocus = () => void refreshPeriodCharges(false);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshPeriodCharges(false);
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [competence]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getBillingModuleSettings()
+      .then((settings) => {
+        if (cancelled) return;
+        setBillingSettings(settings);
+        setBillingModuleDraft(settings.billingModule);
+        setOrganizerPhoneInput(formatPhoneInput(settings.organizerPhone ?? ""));
       })
       .catch(() => {
-        if (!cancelled) flash("Não foi possível carregar as cobranças do mês.");
+        if (!cancelled) setBillingSettingsError("Não foi possível carregar o módulo de cobrança.");
+      })
+      .finally(() => {
+        if (!cancelled) setBillingSettingsLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [competence]);
+  }, []);
 
   useEffect(() => {
     if (!openGroupId) return;
@@ -531,6 +620,29 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       setGatewayError(error instanceof Error ? error.message : "Erro ao salvar a InfiniteTag.");
     } finally {
       setGatewaySaving(false);
+    }
+  }
+
+  async function saveBillingSettings() {
+    if (billingModuleDraft === "cobradora" && !isValidBrPhone(organizerPhoneInput)) {
+      setBillingSettingsError("Informe um celular brasileiro válido com DDD para receber as atualizações.");
+      return;
+    }
+    setBillingSettingsSaving(true);
+    setBillingSettingsError("");
+    try {
+      const settings = await apiClient.updateBillingModuleSettings({
+        billingModule: billingModuleDraft,
+        organizerPhone: billingModuleDraft === "cobradora" ? organizerPhoneInput : null,
+      });
+      setBillingSettings(settings);
+      setBillingModuleDraft(settings.billingModule);
+      setOrganizerPhoneInput(formatPhoneInput(settings.organizerPhone ?? ""));
+      flash(settings.billingModule === "cobradora" ? "Módulo CobraDora configurado." : "Módulo Dora configurado.");
+    } catch (error) {
+      setBillingSettingsError(error instanceof Error ? error.message : "Não foi possível atualizar o módulo.");
+    } finally {
+      setBillingSettingsSaving(false);
     }
   }
 
@@ -787,6 +899,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       phone: "",
       billingAmount: formatAmountInput(Math.round(group.amount * 100)),
       tag: "",
+      whatsappConsent: false,
     });
     setMemberError("");
     setMemberModal(true);
@@ -810,7 +923,9 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       phone: participant.phone,
       billingAmount: formatAmountInput(billingAmount),
       tag: participant.tags[groupId] ?? "",
+      whatsappConsent: participant.whatsappConsent,
     });
+    setParticipantConsentTouched(false);
     setParticipantError("");
   }
 
@@ -842,6 +957,8 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     setParticipantSaving(true);
     setParticipantError("");
     try {
+      let updatedContact: ParticipantContactDetails | null = null;
+      const consentWasEdited = participantConsentTouched;
       const currentBillingAmount = participantModalPerson.billingAmounts[groupId];
       if (currentBillingAmount !== billingAmount) {
         await apiClient.updateGroupParticipantBillingAmount(
@@ -872,8 +989,16 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
           ),
         );
       }
-      if (name !== participantModalPerson.name || phone !== participantModalPerson.phone) {
-        await apiClient.updateParticipant(participantId, { name, phone });
+      if (
+        name !== participantModalPerson.name ||
+        phone !== participantModalPerson.phone ||
+        consentWasEdited
+      ) {
+        updatedContact = await apiClient.updateParticipant(participantId, {
+          name,
+          phone,
+          ...(consentWasEdited && { whatsappConsent: participantEditForm.whatsappConsent }),
+        });
       }
       const tag = participantEditForm.tag.trim();
       const currentTag = participantModalPerson.tags[groupId] ?? "";
@@ -886,12 +1011,36 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
         });
       }
       setParticipants((previous) =>
-        previous.map((participant) =>
-          participant.id === participantId
-            ? { ...participant, name, initials: name.slice(0, 2).toUpperCase(), phone, tags: { ...participant.tags, [groupId]: tag } }
-            : participant,
-        ),
+        previous.map((participant) => {
+          const sharesUpdatedContact =
+            updatedContact !== null &&
+            participant.financialContactId === updatedContact.financialContactId;
+          const isEditedParticipant = participant.id === participantId;
+          if (!sharesUpdatedContact && !isEditedParticipant) return participant;
+
+          const contactConsent = updatedContact
+            ? hasActiveWhatsappConsent(updatedContact)
+            : participant.whatsappConsent;
+          return {
+            ...participant,
+            ...(sharesUpdatedContact && { whatsappConsent: contactConsent }),
+            ...(isEditedParticipant && {
+              financialContactId: updatedContact?.financialContactId ?? participant.financialContactId,
+              name: updatedContact?.name ?? name,
+              initials: (updatedContact?.name ?? name).slice(0, 2).toUpperCase(),
+              phone: updatedContact?.phoneDisplay ?? phone,
+              whatsappConsent: updatedContact ? contactConsent : participant.whatsappConsent,
+              tags: { ...participant.tags, [groupId]: tag },
+            }),
+          };
+        }),
       );
+      const refreshed = await apiClient.listGroupParticipants(groupId);
+      reconcileGroupParticipants(
+        refreshed.participants.map((row) => mapGroupParticipant(row, groupId)),
+        groupId,
+      );
+      setGroupTagOrders((previous) => ({ ...previous, [groupId]: refreshed.tagOrder }));
       setParticipantModal(null);
       flash("Participante atualizado.");
     } catch (error) {
@@ -995,17 +1144,25 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     setMemberError("");
     const tag = memberForm.tag.trim();
     try {
-      const result = unwrapParticipant(await apiClient.addParticipant(groupId, { name, phone, billingAmount, tag: tag || undefined }));
+      const result = unwrapParticipant(await apiClient.addParticipant(groupId, {
+        name,
+        phone,
+        billingAmount,
+        tag: tag || undefined,
+        ...(billingSettings?.billingModule === "cobradora" && memberForm.whatsappConsent && { whatsappConsent: true }),
+      }));
       const id = result.participant.id ?? `local-${Date.now()}`;
       upsertParticipant(
         {
           id,
+          financialContactId: result.participant.financialContactId ?? id,
           name: result.participant.name || name,
           initials: (result.participant.name || name).slice(0, 2).toUpperCase(),
           phone: result.participant.phoneDisplay || result.participant.phone || phone,
           groupIds: [groupId],
           billingAmounts: { [groupId]: billingAmount },
           tags: { [groupId]: tag },
+          whatsappConsent: hasActiveWhatsappConsent(result.participant) || memberForm.whatsappConsent,
         },
         groupId,
       );
@@ -1021,7 +1178,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
         setLateCycleNotice(`${name} foi adicionado, mas entra nas cobranças somente em ${cycle}.`);
       }
       setMemberModal(false);
-      setMemberForm({ name: "", phone: "", billingAmount: "", tag: "" });
+      setMemberForm({ name: "", phone: "", billingAmount: "", tag: "", whatsappConsent: false });
       flash(`${name} adicionado ao grupo.`);
     } catch (error) {
       setMemberError(error instanceof Error ? error.message : "Erro ao adicionar o participante.");
@@ -1052,6 +1209,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
           name,
           include: !duplicate,
           phone: "",
+          whatsappConsent: false,
           error: duplicate ? "Nome duplicado neste grupo" : "",
         };
       }),
@@ -1083,18 +1241,21 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
             name: row.name,
             phone: row.phone,
             billingAmount: suggestedBillingAmount,
+            ...(billingSettings?.billingModule === "cobradora" && row.whatsappConsent && { whatsappConsent: true }),
           }),
         );
         const id = result.participant.id ?? `local-${row.id}`;
         upsertParticipant(
           {
             id,
+            financialContactId: result.participant.financialContactId ?? id,
             name: result.participant.name || row.name,
             initials: (result.participant.name || row.name).slice(0, 2).toUpperCase(),
             phone: result.participant.phoneDisplay || result.participant.phone || row.phone,
             groupIds: [openGroup.id],
             billingAmounts: { [openGroup.id]: suggestedBillingAmount },
             tags: { [openGroup.id]: "" },
+            whatsappConsent: hasActiveWhatsappConsent(result.participant) || row.whatsappConsent,
           },
           openGroup.id,
         );
@@ -1225,6 +1386,16 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   const messagePreviewLines = openGroup
     ? automaticLines({ ...openGroup, messageParticipantFilter: groupEditMessageFilter }, competence)
     : [];
+  const infinitePayConfigured = gatewayAccount?.status === "active";
+  const automationConfigured =
+    billingSettings?.billingModule === "cobradora" &&
+    Boolean(billingSettings.organizerPhone) &&
+    infinitePayConfigured;
+  const billingSettingsDirty = Boolean(
+    billingSettings &&
+      (billingSettings.billingModule !== billingModuleDraft ||
+        formatPhoneInput(billingSettings.organizerPhone ?? "") !== formatPhoneInput(organizerPhoneInput)),
+  );
 
   return (
     <div className="cobradora-shell">
@@ -1263,6 +1434,19 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
             </button>
           )}
         </section>
+
+        {!gatewayLoading && !infinitePayConfigured && (
+          <section className={`gateway-required-banner ${mobileTab === "home" ? "" : "mobile-tab-hidden"}`} aria-labelledby="gateway-required-title">
+            <span className="gateway-required-banner__icon"><CreditCard size={22} aria-hidden="true" /></span>
+            <div>
+              <p className="section-kicker">Etapa obrigatória</p>
+              <h2 id="gateway-required-title">Conecte sua conta InfinitePay</h2>
+              <p>Dora e CobraDora usam a InfinitePay para enviar cada pagamento direto para sua conta.</p>
+              <a href="https://www.infinitepay.io/conta" target="_blank" rel="noopener noreferrer">Ainda não tem conta? Abra gratuitamente</a>
+            </div>
+            {isAdmin && <button className="button button--primary" type="button" onClick={openGatewayModal}>Conectar InfiniteTag</button>}
+          </section>
+        )}
 
         <section className={`summary-grid ${mobileTab === "home" ? "" : "mobile-tab-hidden"}`} aria-label={`Resumo de ${monthLabel(competence)}`}>
           <article className="summary-card summary-card--expected">
@@ -1365,15 +1549,113 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
             <p>Conta, conexão com a InfinitePay e segurança.</p>
           </div>
           <div className="settings-grid">
+            <article className="setting-card setting-card--module">
+              <div className="setting-card__module-heading">
+                <div className="setting-card__heading">
+                  <div className="setting-card__icon"><MessageCircleMore size={22} /></div>
+                  <div>
+                    <p className="setting-label">Módulo de cobrança</p>
+                    <h3>
+                      {billingSettingsLoading
+                        ? "Carregando módulo…"
+                        : !billingSettings
+                          ? "Módulo indisponível"
+                          : billingSettings.billingModule === "cobradora"
+                            ? "CobraDora"
+                            : "Dora"}
+                    </h3>
+                    <p>Escolha entre compartilhar as listas pelo painel ou automatizar as cobranças privadas.</p>
+                  </div>
+                </div>
+                <span
+                  className={`status-pill ${automationConfigured ? "status-pill--active" : ""}`}
+                  aria-live="polite"
+                >
+                  {billingSettingsLoading
+                    ? "Carregando"
+                    : !billingSettings
+                      ? "Indisponível"
+                    : billingSettings.billingModule === "dora"
+                      ? "Controle manual"
+                      : automationConfigured
+                        ? "Configuração cadastrada"
+                        : "Configuração pendente"}
+                </span>
+              </div>
+
+              {billingSettings && (
+                <>
+                  <fieldset className="module-setting-options">
+                    <legend>Como deseja operar?</legend>
+                    <label className={billingModuleDraft === "dora" ? "selected" : ""}>
+                      <input type="radio" name="dashboard-billing-module" checked={billingModuleDraft === "dora"} onChange={() => { setBillingModuleDraft("dora"); setBillingSettingsError(""); }} disabled={!isAdmin || billingSettingsSaving} />
+                      <span><strong>Dora</strong><small>Grátis · você copia ou compartilha a lista.</small></span>
+                    </label>
+                    <label className={billingModuleDraft === "cobradora" ? "selected" : ""}>
+                      <input type="radio" name="dashboard-billing-module" checked={billingModuleDraft === "cobradora"} onChange={() => { setBillingModuleDraft("cobradora"); setBillingSettingsError(""); }} disabled={!isAdmin || billingSettingsSaving} />
+                      <span><strong>CobraDora</strong><small>Automação · cobrança privada e atualização para você.</small></span>
+                    </label>
+                  </fieldset>
+
+                  {billingModuleDraft === "cobradora" && (
+                    <div className="module-organizer-phone">
+                      <label htmlFor="organizer-whatsapp">WhatsApp do organizador</label>
+                      <input
+                        id="organizer-whatsapp"
+                        type="tel"
+                        inputMode="numeric"
+                        autoComplete="tel"
+                        maxLength={15}
+                        value={organizerPhoneInput}
+                        onChange={(event) => setOrganizerPhoneInput(formatPhoneInput(event.target.value))}
+                        placeholder="(11) 99999-9999"
+                        disabled={!isAdmin || billingSettingsSaving}
+                        aria-describedby="organizer-whatsapp-hint"
+                      />
+                      <p id="organizer-whatsapp-hint">As listas atualizadas serão enviadas para este número.</p>
+                    </div>
+                  )}
+
+                  <div className={`automation-state ${billingModuleDraft === "cobradora" && infinitePayConfigured && isValidBrPhone(organizerPhoneInput) ? "automation-state--ready" : ""}`}>
+                    {billingModuleDraft === "dora"
+                      ? "Na Dora, as ações Copiar link e Compartilhar continuam disponíveis em cada grupo."
+                      : !infinitePayConfigured
+                        ? "Cadastre a InfiniteTag para completar os dados da CobraDora."
+                        : isValidBrPhone(organizerPhoneInput)
+                          ? "Dados cadastrados. A InfiniteTag e os templates não são verificados automaticamente; faça um checkout e um envio de teste antes do uso real."
+                          : "Informe o WhatsApp do organizador para completar os dados de atualização."}
+                  </div>
+
+                  {billingModuleDraft === "cobradora" && (
+                    <p className="module-terms-note">
+                      Ao salvar, você habilita as automações disponíveis e confirma que leu os{" "}
+                      <a href="/termos-de-uso" target="_blank" rel="noopener noreferrer">Termos de Uso</a>.
+                      A seleção do módulo não cria cobrança de assinatura.
+                    </p>
+                  )}
+
+                  {billingSettingsError && <p className="form-error" role="alert">{billingSettingsError}</p>}
+                  {isAdmin && (
+                    <div className="setting-actions">
+                      <button className="button button--primary" type="button" onClick={saveBillingSettings} disabled={billingSettingsSaving || !billingSettingsDirty || (billingModuleDraft === "cobradora" && !isValidBrPhone(organizerPhoneInput))}>
+                        {billingSettingsSaving ? <Spinner size={17} /> : <Save size={17} />} {billingSettingsSaving ? "Salvando…" : "Salvar módulo"}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+              {!billingSettings && billingSettingsError && <p className="form-error" role="alert">{billingSettingsError}</p>}
+            </article>
+
             <article className="setting-card setting-card--gateway">
               <div className="setting-card__icon"><CreditCard size={22} /></div>
               <div className="setting-card__content">
                 <p className="setting-label">InfinitePay</p>
                 <h3>{gatewayAccount ? `@${gatewayAccount.externalAccountId}` : "Conecte sua InfiniteTag"}</h3>
-                <p>{gatewayAccount ? "Checkout habilitado para sua organização." : "Necessária para gerar links de pagamento seguros."}</p>
+                <p>{gatewayAccount ? "InfiniteTag cadastrada, mas não verificada automaticamente. Faça um checkout de teste antes do uso real." : "Necessária para gerar links de pagamento seguros."}</p>
               </div>
-              <span className={`status-pill ${gatewayAccount?.status === "active" ? "status-pill--active" : ""}`}>
-                {gatewayAccount?.status === "active" ? "Conectada" : "Pendente"}
+              <span className="status-pill">
+                {!gatewayAccount ? "Pendente" : gatewayAccount.status === "disabled" ? "Desativada" : "Não verificada"}
               </span>
               {isAdmin && <button className="button button--secondary" type="button" onClick={openGatewayModal}>{gatewayAccount ? "Editar" : "Conectar"}</button>}
             </article>
@@ -1471,9 +1753,33 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       {isAdmin && <>
       {groupModal && <ModalShell title="Novo grupo" id="new-group-title" onClose={() => !creatingGroup && setGroupModal(false)} locked={creatingGroup}><label htmlFor="group-name">Nome do grupo</label><input id="group-name" maxLength={NAME_MAX} value={groupForm.name} onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })} placeholder="Vôlei de quinta" autoFocus disabled={creatingGroup} /><label htmlFor="group-sport">Modalidade (opcional)</label><input id="group-sport" maxLength={40} value={groupForm.sport} onChange={(event) => setGroupForm({ ...groupForm, sport: event.target.value })} placeholder="Vôlei" disabled={creatingGroup} /><div className="field-grid"><div><label htmlFor="group-amount">Sugestão de valor</label><div className="input-prefix"><span>R$</span><input id="group-amount" value={groupForm.amount} onChange={(event) => setGroupForm({ ...groupForm, amount: event.target.value.replace(/[^\d,.]/g, "") })} inputMode="decimal" placeholder="80,00" disabled={creatingGroup} /></div><p className="field-hint">Preenche novos cadastros, mas cada participante pode ter seu próprio valor.</p></div><div><label htmlFor="group-day">Renovação</label><div className="input-prefix"><span>dia</span><input id="group-day" type="number" min={1} max={28} inputMode="numeric" placeholder="manual" value={groupForm.billingDay} onChange={(event) => setGroupForm({ ...groupForm, billingDay: event.target.value })} disabled={creatingGroup} /></div><p className="field-hint">Deixe em branco para renovar manualmente.</p></div></div>{groupCreateError && <p className="form-error" role="alert">{groupCreateError}</p>}<button className="button button--primary button--full" type="button" onClick={createGroup} disabled={creatingGroup || !groupForm.name.trim()}>{creatingGroup && <Spinner />}{creatingGroup ? "Criando…" : "Criar grupo"}</button></ModalShell>}
 
-      {gatewayModal && <ModalShell title="Conta InfinitePay" id="gateway-title" onClose={() => !gatewaySaving && setGatewayModal(false)} locked={gatewaySaving}><p className="modal-copy">Informe a InfiniteTag que receberá os pagamentos da organização.</p><label htmlFor="gateway-handle">InfiniteTag (sem $)</label><div className="input-prefix"><span>@</span><input id="gateway-handle" maxLength={80} value={gatewayInput} onChange={(event) => setGatewayInput(event.target.value.replace(/^\$/, ""))} placeholder="minha-infinite-tag" autoFocus disabled={gatewaySaving} /></div>{gatewayError && <p className="form-error" role="alert">{gatewayError}</p>}<button className="button button--primary button--full" type="button" onClick={saveGatewayHandle} disabled={gatewaySaving || !gatewayInput.trim()}>{gatewaySaving && <Spinner />}{gatewaySaving ? "Salvando…" : "Salvar InfiniteTag"}</button></ModalShell>}
+      {gatewayModal && (
+        <ModalShell title="Conta InfinitePay" id="gateway-title" onClose={() => !gatewaySaving && setGatewayModal(false)} locked={gatewaySaving}>
+          <p className="modal-copy">Informe a InfiniteTag que receberá os pagamentos da organização.</p>
+          <label htmlFor="gateway-handle">InfiniteTag (sem $)</label>
+          <div className="input-prefix">
+            <span>@</span>
+            <input
+              id="gateway-handle"
+              maxLength={24}
+              value={gatewayInput}
+              onChange={(event) => setGatewayInput(event.target.value.replace(/^\$/, ""))}
+              placeholder="minha-infinite-tag"
+              aria-describedby="gateway-handle-hint"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              autoFocus
+              disabled={gatewaySaving}
+            />
+          </div>
+          <p id="gateway-handle-hint" className="field-hint">Comece com uma letra e use até 24 caracteres: letras, números, hífen e no máximo um sublinhado.</p>
+          {gatewayError && <p className="form-error" role="alert">{gatewayError}</p>}
+          <button className="button button--primary button--full" type="button" onClick={saveGatewayHandle} disabled={gatewaySaving || !gatewayInput.trim()}>{gatewaySaving && <Spinner />}{gatewaySaving ? "Salvando…" : "Salvar InfiniteTag"}</button>
+        </ModalShell>
+      )}
 
-      {memberModal && openGroup && <ModalShell title={`Adicionar a ${openGroup.name}`} id="member-title" onClose={() => !memberSaving && setMemberModal(false)} locked={memberSaving}><p className="modal-copy">Se o ciclo deste mês já foi renovado, a pessoa entrará apenas na próxima cobrança.</p><label htmlFor="member-name">Nome</label><input id="member-name" maxLength={NAME_MAX} value={memberForm.name} onChange={(event) => setMemberForm({ ...memberForm, name: event.target.value })} placeholder="Nome do participante" autoFocus disabled={memberSaving} /><label htmlFor="member-phone">Celular com DDD</label><input id="member-phone" type="tel" inputMode="numeric" maxLength={15} value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: formatPhoneInput(event.target.value) })} placeholder="(11) 99999-9999" disabled={memberSaving} /><label htmlFor="member-billing-amount">Valor deste participante</label><div className="input-prefix"><span>R$</span><input id="member-billing-amount" inputMode="decimal" value={memberForm.billingAmount} onChange={(event) => setMemberForm({ ...memberForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={memberSaving} /></div><p className="field-hint">A sugestão de {formatMoney(openGroup.amount)} veio do grupo. Ajuste aqui sem alterar os demais participantes.</p><label htmlFor="member-tag">Categoria (opcional)</label><input id="member-tag" maxLength={60} value={memberForm.tag} onChange={(event) => setMemberForm({ ...memberForm, tag: event.target.value })} placeholder="Ex.: Sub-15" disabled={memberSaving} />{memberError && <p className="form-error" role="alert">{memberError}</p>}<button className="button button--primary button--full" type="button" onClick={() => addMember(openGroup.id)} disabled={memberSaving || !memberForm.name.trim() || !memberForm.phone.trim() || !memberForm.billingAmount.trim()}>{memberSaving && <Spinner />}{memberSaving ? "Adicionando…" : "Adicionar participante"}</button></ModalShell>}
+      {memberModal && openGroup && <ModalShell title={`Adicionar a ${openGroup.name}`} id="member-title" onClose={() => !memberSaving && setMemberModal(false)} locked={memberSaving}><p className="modal-copy">Se o ciclo deste mês já foi renovado, a pessoa entrará apenas na próxima cobrança.</p><label htmlFor="member-name">Nome</label><input id="member-name" maxLength={NAME_MAX} value={memberForm.name} onChange={(event) => setMemberForm({ ...memberForm, name: event.target.value })} placeholder="Nome do participante" autoFocus disabled={memberSaving} /><label htmlFor="member-phone">Celular com DDD</label><input id="member-phone" type="tel" inputMode="numeric" maxLength={15} value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: formatPhoneInput(event.target.value) })} placeholder="(11) 99999-9999" disabled={memberSaving} /><label htmlFor="member-billing-amount">Valor deste participante</label><div className="input-prefix"><span>R$</span><input id="member-billing-amount" inputMode="decimal" value={memberForm.billingAmount} onChange={(event) => setMemberForm({ ...memberForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={memberSaving} /></div><p className="field-hint">A sugestão de {formatMoney(openGroup.amount)} veio do grupo. Ajuste aqui sem alterar os demais participantes.</p><label htmlFor="member-tag">Categoria (opcional)</label><input id="member-tag" maxLength={60} value={memberForm.tag} onChange={(event) => setMemberForm({ ...memberForm, tag: event.target.value })} placeholder="Ex.: Sub-15" disabled={memberSaving} />{billingSettings?.billingModule === "cobradora" && <label className="whatsapp-consent"><input type="checkbox" checked={memberForm.whatsappConsent} onChange={(event) => setMemberForm({ ...memberForm, whatsappConsent: event.target.checked })} disabled={memberSaving} /><span><strong>Registrar autorização para cobrança privada no WhatsApp</strong><small>Marque somente com autorização explícita. Desmarcado, o cadastro preserva uma autorização já existente para este número.</small></span></label>}{memberError && <p className="form-error" role="alert">{memberError}</p>}<button className="button button--primary button--full" type="button" onClick={() => addMember(openGroup.id)} disabled={memberSaving || !memberForm.name.trim() || !memberForm.phone.trim() || !memberForm.billingAmount.trim()}>{memberSaving && <Spinner />}{memberSaving ? "Adicionando…" : "Adicionar participante"}</button></ModalShell>}
 
       {settleModal && <ModalShell title="Registrar pagamento" id="settle-title" onClose={() => !settleSaving && setSettleModal(null)} locked={settleSaving}><p className="modal-copy">Use a baixa manual apenas quando o pagamento foi confirmado fora do checkout.</p><fieldset className="message-filter"><legend>Forma de pagamento</legend><label><input type="radio" name="settle-method" checked={settleMethod === "dinheiro"} onChange={() => setSettleMethod("dinheiro")} disabled={settleSaving} /> Dinheiro</label><label><input type="radio" name="settle-method" checked={settleMethod === "pix"} onChange={() => setSettleMethod("pix")} disabled={settleSaving} /> Pix</label><label><input type="radio" name="settle-method" checked={settleMethod === "outro"} onChange={() => setSettleMethod("outro")} disabled={settleSaving} /> Outro</label></fieldset><label htmlFor="settle-observation">Observação {settleMethod === "outro" ? "" : "(opcional)"}</label><textarea id="settle-observation" maxLength={300} rows={3} value={settleObservation} onChange={(event) => setSettleObservation(event.target.value)} placeholder={settleMethod === "outro" ? "Descreva a forma de pagamento" : "Ex.: pago em espécie"} disabled={settleSaving} />{settleError && <p className="form-error" role="alert">{settleError}</p>}<div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setSettleModal(null)} disabled={settleSaving}>Cancelar</button><button className="button button--primary" type="button" onClick={confirmSettle} disabled={settleSaving || (settleMethod === "outro" && !settleObservation.trim())}>{settleSaving && <Spinner />}{settleSaving ? "Salvando…" : "Confirmar baixa"}</button></div></ModalShell>}
 
@@ -1507,9 +1813,47 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
 
         {groupError && <p className="form-error" role="alert">{groupError}</p>}<button className="button button--primary button--full" type="button" onClick={saveGroupName} disabled={groupSaving || !groupEditName.trim() || !groupEditAmount.trim() || !groupEditMessageIntro.trim() || !groupEditMessageOutro.trim()}>{groupSaving && <Spinner />}{groupSaving ? "Salvando…" : "Salvar grupo"}</button><div className="danger-zone">{confirmDeleteGroup ? <><p>Arquivar remove o grupo das listas ativas. Grupos com cobranças em aberto não podem ser arquivados.</p><div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setConfirmDeleteGroup(false)} disabled={groupSaving}>Cancelar</button><button className="button button--danger" type="button" onClick={removeGroup} disabled={groupSaving}>{groupSaving && <Spinner />}{groupSaving ? "Arquivando…" : "Confirmar"}</button></div></> : <button className="button button--danger-soft button--full" type="button" onClick={() => setConfirmDeleteGroup(true)}><Trash2 size={17} /> Arquivar grupo</button>}</div></ModalShell>}
 
-      {participantModal && participantModalPerson && <ModalShell title={participantModalPerson.name} id="participant-title" onClose={() => !participantSaving && setParticipantModal(null)} locked={participantSaving}><label htmlFor="participant-name">Nome</label><input id="participant-name" maxLength={NAME_MAX} value={participantEditForm.name} onChange={(event) => setParticipantEditForm({ ...participantEditForm, name: event.target.value })} disabled={participantSaving} /><label htmlFor="participant-phone">Celular</label><input id="participant-phone" type="tel" inputMode="numeric" maxLength={15} value={participantEditForm.phone} onChange={(event) => setParticipantEditForm({ ...participantEditForm, phone: formatPhoneInput(event.target.value) })} disabled={participantSaving} /><label htmlFor="participant-billing-amount">Valor cobrado neste grupo</label><div className="input-prefix"><span>R$</span><input id="participant-billing-amount" inputMode="decimal" value={participantEditForm.billingAmount} onChange={(event) => setParticipantEditForm({ ...participantEditForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={participantSaving} /></div><p className="field-hint">O checkout usará este valor. A alteração também atualiza cobranças abertas; checkouts já iniciados precisam terminar primeiro.</p><label htmlFor="participant-tag">Categoria (opcional)</label><input id="participant-tag" maxLength={60} value={participantEditForm.tag} onChange={(event) => setParticipantEditForm({ ...participantEditForm, tag: event.target.value })} placeholder="Ex.: Sub-15" disabled={participantSaving} />{participantError && <p className="form-error" role="alert">{participantError}</p>}<button className="button button--primary button--full" type="button" onClick={saveParticipantEdit} disabled={participantSaving || !participantEditForm.name.trim() || !participantEditForm.phone.trim() || !participantEditForm.billingAmount.trim()}>{participantSaving && <Spinner />}{participantSaving ? "Salvando…" : "Salvar participante"}</button><div className="danger-zone"><p>Remover desvincula a pessoa somente deste grupo.</p><button className="button button--danger-soft button--full" type="button" onClick={removeParticipantFromGroup} disabled={participantSaving}><Trash2 size={17} /> Remover do grupo</button></div></ModalShell>}
+      {participantModal && participantModalPerson && (
+        <ModalShell
+          title={participantModalPerson.name}
+          id="participant-title"
+          onClose={() => !participantSaving && setParticipantModal(null)}
+          locked={participantSaving}
+        >
+          <label htmlFor="participant-name">Nome</label>
+          <input id="participant-name" maxLength={NAME_MAX} value={participantEditForm.name} onChange={(event) => setParticipantEditForm({ ...participantEditForm, name: event.target.value })} disabled={participantSaving} />
+          <label htmlFor="participant-phone">Celular</label>
+          <input id="participant-phone" type="tel" inputMode="numeric" maxLength={15} value={participantEditForm.phone} onChange={(event) => setParticipantEditForm({ ...participantEditForm, phone: formatPhoneInput(event.target.value) })} disabled={participantSaving} />
+          <label htmlFor="participant-billing-amount">Valor cobrado neste grupo</label>
+          <div className="input-prefix"><span>R$</span><input id="participant-billing-amount" inputMode="decimal" value={participantEditForm.billingAmount} onChange={(event) => setParticipantEditForm({ ...participantEditForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={participantSaving} /></div>
+          <p className="field-hint">O checkout usará este valor. A alteração também atualiza cobranças abertas; checkouts já iniciados precisam terminar primeiro.</p>
+          <label htmlFor="participant-tag">Categoria (opcional)</label>
+          <input id="participant-tag" maxLength={60} value={participantEditForm.tag} onChange={(event) => setParticipantEditForm({ ...participantEditForm, tag: event.target.value })} placeholder="Ex.: Sub-15" disabled={participantSaving} />
+          <label className="whatsapp-consent">
+            <input
+              type="checkbox"
+              checked={participantEditForm.whatsappConsent}
+              onChange={(event) => {
+                setParticipantEditForm({ ...participantEditForm, whatsappConsent: event.target.checked });
+                setParticipantConsentTouched(true);
+              }}
+              disabled={participantSaving}
+            />
+            <span>
+              <strong>Autorização para cobranças privadas no WhatsApp</strong>
+              <small>
+                Esta autorização vale para todos os participantes associados a este número. Desmarcar registra a revogação
+                {billingSettings?.billingModule === "dora" ? ", mesmo enquanto a Dora não envia mensagens automáticas." : "."}
+              </small>
+            </span>
+          </label>
+          {participantError && <p className="form-error" role="alert">{participantError}</p>}
+          <button className="button button--primary button--full" type="button" onClick={saveParticipantEdit} disabled={participantSaving || !participantEditForm.name.trim() || !participantEditForm.phone.trim() || !participantEditForm.billingAmount.trim()}>{participantSaving && <Spinner />}{participantSaving ? "Salvando…" : "Salvar participante"}</button>
+          <div className="danger-zone"><p>Remover desvincula a pessoa somente deste grupo.</p><button className="button button--danger-soft button--full" type="button" onClick={removeParticipantFromGroup} disabled={participantSaving}><Trash2 size={17} /> Remover do grupo</button></div>
+        </ModalShell>
+      )}
 
-      {importModal && openGroup && <ModalShell title="Importar participantes" id="import-title" wide onClose={() => !importSaving && setImportModal(false)} locked={importSaving}><p className="modal-copy">Cole um nome por linha. Nomes repetidos no grupo serão bloqueados. Os importados começam com a sugestão de {formatMoney(openGroup.amount)}, que pode ser editada depois em cada cadastro.</p><label htmlFor="import-text">Lista de nomes</label><textarea id="import-text" maxLength={5000} rows={5} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={"1. Ana\n2. Bruno\n3. Camila"} disabled={importSaving} /><button className="button button--secondary button--full" type="button" onClick={analyzeImportText} disabled={importSaving || !importText.trim()}>Analisar lista</button>{importRows.length > 0 && <ul className="import-list">{importRows.map((row) => <li key={row.id} className="import-row"><input type="checkbox" checked={row.include} onChange={(event) => updateImportRow(row.id, { include: event.target.checked })} aria-label={`Incluir ${row.name}`} disabled={importSaving || Boolean(row.error && !row.phone)} /><span className="import-row__name">{row.name}</span>{row.include && <input type="tel" inputMode="numeric" maxLength={15} value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: formatPhoneInput(event.target.value), error: "" })} onFocus={(event) => event.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })} placeholder="(11) 99999-9999" aria-label={`Telefone de ${row.name}`} disabled={importSaving} />}{row.error && <small role="alert">{row.error}</small>}</li>)}</ul>}{importRows.length > 0 && <div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setImportModal(false)} disabled={importSaving}>Fechar</button><button className="button button--primary" type="button" onClick={confirmImport} disabled={importSaving || !importRows.some((row) => row.include)}>{importSaving && <Spinner />}{importSaving ? "Importando…" : "Importar selecionados"}</button></div>}</ModalShell>}
+      {importModal && openGroup && <ModalShell title="Importar participantes" id="import-title" wide onClose={() => !importSaving && setImportModal(false)} locked={importSaving}><p className="modal-copy">Cole um nome por linha. Nomes repetidos no grupo serão bloqueados. Os importados começam com a sugestão de {formatMoney(openGroup.amount)}, que pode ser editada depois em cada cadastro.</p>{billingSettings?.billingModule === "cobradora" && <p className="consent-explainer">Marcar registra a autorização explícita para este número. Deixar desmarcado não revoga uma autorização já existente.</p>}<label htmlFor="import-text">Lista de nomes</label><textarea id="import-text" maxLength={5000} rows={5} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={"1. Ana\n2. Bruno\n3. Camila"} disabled={importSaving} /><button className="button button--secondary button--full" type="button" onClick={analyzeImportText} disabled={importSaving || !importText.trim()}>Analisar lista</button>{importRows.length > 0 && <ul className="import-list">{importRows.map((row) => <li key={row.id} className="import-row"><input type="checkbox" checked={row.include} onChange={(event) => updateImportRow(row.id, { include: event.target.checked })} aria-label={`Incluir ${row.name}`} disabled={importSaving || Boolean(row.error && !row.phone)} /><span className="import-row__name">{row.name}</span>{row.include && <><input type="tel" inputMode="numeric" maxLength={15} value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: formatPhoneInput(event.target.value), error: "" })} onFocus={(event) => event.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })} placeholder="(11) 99999-9999" aria-label={`Telefone de ${row.name}`} disabled={importSaving} />{billingSettings?.billingModule === "cobradora" && <label className="import-row__consent"><input type="checkbox" checked={row.whatsappConsent} onChange={(event) => updateImportRow(row.id, { whatsappConsent: event.target.checked })} aria-label={`Registrar autorização de WhatsApp para ${row.name}`} disabled={importSaving} /><span>Registrar autorização</span></label>}</>}{row.error && <small role="alert">{row.error}</small>}</li>)}</ul>}{importRows.length > 0 && <div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setImportModal(false)} disabled={importSaving}>Fechar</button><button className="button button--primary" type="button" onClick={confirmImport} disabled={importSaving || !importRows.some((row) => row.include)}>{importSaving && <Spinner />}{importSaving ? "Importando…" : "Importar selecionados"}</button></div>}</ModalShell>}
       </>}
     </div>
   );

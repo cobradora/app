@@ -6,10 +6,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "CobraDora — Cobranças para grupos",
+    default: "CobraDora — Cobranças para grupos, do manual ao automático",
     template: "%s · CobraDora",
   },
-  description: "Organize grupos, acompanhe pagamentos e cobre sem enrolação com a CobraDora.",
+  description: "Escolha o Dora gratuito ou automatize cobranças privadas pelo WhatsApp com o CobraDora.",
   icons: {
     icon: [{ url: favicon.src, type: "image/png" }],
     shortcut: favicon.src,

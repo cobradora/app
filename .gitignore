@@ -1,7 +1,9 @@
 node_modules
 .env.local
 .env.production
+.env.test
 .next
+.tools/
 dist
 coverage
 *.log

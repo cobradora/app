@@ -18,6 +18,7 @@ import { sql } from "drizzle-orm";
 
 // ---------- Enums ----------
 export const orgStatusEnum = pgEnum("org_status", ["active", "suspended"]);
+export const billingModuleEnum = pgEnum("billing_module", ["dora", "cobradora"]);
 export const userRoleEnum = pgEnum("user_role", ["owner", "admin", "member"]);
 export const userStatusEnum = pgEnum("user_status", ["active", "inactive"]);
 export const groupStatusEnum = pgEnum("group_status", ["active", "archived"]);
@@ -60,6 +61,19 @@ export const webhookProcessingStatusEnum = pgEnum("webhook_processing_status", [
   "processed",
   "failed",
 ]);
+export const whatsappNotificationKindEnum = pgEnum("whatsapp_notification_kind", [
+  "charge_reminder",
+  "organizer_cycle_start",
+  "organizer_list_update",
+]);
+export const whatsappDeliveryStatusEnum = pgEnum("whatsapp_delivery_status", [
+  "queued",
+  "sending",
+  "sent",
+  "delivered",
+  "read",
+  "failed",
+]);
 export const auditActorTypeEnum = pgEnum("audit_actor_type", ["user", "system", "participant"]);
 
 // ---------- organizations ----------
@@ -67,9 +81,25 @@ export const organizations = pgTable("organizations", {
   id: uuid("id").defaultRandom().primaryKey(),
   name: varchar("name", { length: 200 }).notNull(),
   status: orgStatusEnum("status").notNull().default("active"),
+  billingModule: billingModuleEnum("billing_module").notNull().default("dora"),
+  organizerPhoneNormalized: varchar("organizer_phone_normalized", { length: 14 }),
+  organizerPhoneDisplay: varchar("organizer_phone_display", { length: 20 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => ({
+  organizerPhonePairCheck: check(
+    "organizations_organizer_phone_pair_check",
+    sql`(${table.organizerPhoneNormalized} is null and ${table.organizerPhoneDisplay} is null) or (${table.organizerPhoneNormalized} is not null and ${table.organizerPhoneDisplay} is not null)`,
+  ),
+  organizerPhoneFormatCheck: check(
+    "organizations_organizer_phone_format_check",
+    sql`${table.organizerPhoneNormalized} is null or ${table.organizerPhoneNormalized} ~ '^\\+55[1-9][0-9]9[0-9]{8}$'`,
+  ),
+  cobradoraPhoneRequiredCheck: check(
+    "organizations_cobradora_phone_required_check",
+    sql`${table.billingModule} <> 'cobradora' or ${table.organizerPhoneNormalized} is not null`,
+  ),
+}));
 
 // ---------- organization_settings ----------
 export const organizationSettings = pgTable("organization_settings", {
@@ -125,6 +155,8 @@ export const financialContacts = pgTable("financial_contacts", {
   organizationId: uuid("organization_id").notNull().references(() => organizations.id),
   phoneNormalized: varchar("phone_normalized", { length: 14 }).notNull(),
   phoneDisplay: varchar("phone_display", { length: 20 }).notNull(),
+  whatsappOptInAt: timestamp("whatsapp_opt_in_at", { withTimezone: true }),
+  whatsappOptOutAt: timestamp("whatsapp_opt_out_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
@@ -335,6 +367,54 @@ export const paymentAllocations = pgTable("payment_allocations", {
   amount: integer("amount").notNull(),
 }, (table) => ({
   chargeUnique: uniqueIndex("payment_allocations_charge_unique").on(table.chargeId),
+}));
+
+// ---------- whatsapp_notifications ----------
+// Outbox idempotente para mensagens iniciadas pela plataforma. O telefone e
+// o payload ficam congelados para que retries não mudem de destinatário nem
+// de conteúdo se o cadastro for editado depois do primeiro envio.
+export const whatsappNotifications = pgTable("whatsapp_notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  billingPeriodId: uuid("billing_period_id").notNull().references(() => billingPeriods.id),
+  financialContactId: uuid("financial_contact_id"),
+  kind: whatsappNotificationKindEnum("kind").notNull(),
+  status: whatsappDeliveryStatusEnum("status").notNull().default("queued"),
+  recipientPhoneNormalized: varchar("recipient_phone_normalized", { length: 14 }).notNull(),
+  idempotencyKey: varchar("idempotency_key", { length: 200 }).notNull(),
+  payload: jsonb("payload").notNull(),
+  metaMessageId: varchar("meta_message_id", { length: 200 }),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  failedAt: timestamp("failed_at", { withTimezone: true }),
+  errorCode: varchar("error_code", { length: 120 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  idempotencyUnique: uniqueIndex("whatsapp_notifications_idempotency_unique").on(table.idempotencyKey),
+  metaMessageUnique: uniqueIndex("whatsapp_notifications_meta_message_unique").on(table.metaMessageId),
+  dispatchIndex: index("whatsapp_notifications_dispatch_idx").on(table.status, table.nextAttemptAt),
+  organizationIndex: index("whatsapp_notifications_organization_idx").on(table.organizationId, table.createdAt),
+  billingPeriodIndex: index("whatsapp_notifications_billing_period_idx").on(table.billingPeriodId),
+  financialContactIndex: index("whatsapp_notifications_financial_contact_idx").on(table.financialContactId),
+  organizationContactReference: foreignKey({
+    name: "whatsapp_notifications_org_contact_fk",
+    columns: [table.organizationId, table.financialContactId],
+    foreignColumns: [financialContacts.organizationId, financialContacts.id],
+  }),
+  recipientPhoneCheck: check(
+    "whatsapp_notifications_recipient_phone_check",
+    sql`${table.recipientPhoneNormalized} ~ '^\\+55[1-9][0-9]9[0-9]{8}$'`,
+  ),
+  attemptCountCheck: check("whatsapp_notifications_attempt_count_check", sql`${table.attemptCount} >= 0`),
+  kindContactCheck: check(
+    "whatsapp_notifications_kind_contact_check",
+    sql`(${table.kind} = 'charge_reminder' and ${table.financialContactId} is not null) or (${table.kind} in ('organizer_cycle_start', 'organizer_list_update') and ${table.financialContactId} is null)`,
+  ),
 }));
 
 // ---------- commissions ----------

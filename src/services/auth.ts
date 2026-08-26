@@ -3,15 +3,42 @@ import { organizations, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { hashPassword, verifyPassword } from "@/lib/password";
+import { parsePhoneBR, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 
-export const signUpInput = z.object({
-  organizationName: z.string().min(1).max(200),
-  name: z.string().min(1).max(200),
-  email: z.string().email(),
-  password: z.string().min(8).max(200),
-});
+function isValidOrganizerPhone(value: string): boolean {
+  try {
+    parsePhoneBR(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-export type SignUpInput = z.infer<typeof signUpInput>;
+export const signUpInput = z
+  .object({
+    organizationName: z.string().min(1).max(200),
+    name: z.string().min(1).max(200),
+    email: z.string().email(),
+    password: z.string().min(8).max(200),
+    billingModule: z.enum(["dora", "cobradora"]).default("dora"),
+    organizerPhone: z
+      .string()
+      .max(PHONE_INPUT_MAX_LENGTH)
+      .refine(isValidOrganizerPhone, "Informe um celular brasileiro válido com DDD")
+      .nullable()
+      .optional(),
+  })
+  .superRefine((input, context) => {
+    if (input.billingModule === "cobradora" && !input.organizerPhone) {
+      context.addIssue({
+        code: "custom",
+        path: ["organizerPhone"],
+        message: "Informe o WhatsApp do organizador para usar o módulo CobraDora",
+      });
+    }
+  });
+
+export type SignUpInput = z.input<typeof signUpInput>;
 
 /**
  * Cria a organizacao e o primeiro usuario (owner) de uma vez, para o
@@ -25,9 +52,18 @@ export async function signUp(rawInput: SignUpInput) {
   if (existing) return null;
 
   const passwordHash = await hashPassword(input.password);
+  const organizerPhone = input.organizerPhone ? parsePhoneBR(input.organizerPhone) : null;
 
   return db.transaction(async (tx) => {
-    const [organization] = await tx.insert(organizations).values({ name: input.organizationName }).returning();
+    const [organization] = await tx
+      .insert(organizations)
+      .values({
+        name: input.organizationName,
+        billingModule: input.billingModule,
+        organizerPhoneNormalized: organizerPhone?.normalized ?? null,
+        organizerPhoneDisplay: organizerPhone?.display ?? null,
+      })
+      .returning();
     const [user] = await tx
       .insert(users)
       .values({
