@@ -18,6 +18,8 @@ import {
   dispatchWhatsappNotifications,
   enqueueOrganizerListUpdates,
 } from "@/services/whatsapp-notifications";
+import { notifyOrganizationEvent } from "@/services/push-notifications";
+import { formatMoney } from "@/lib/mock-data";
 
 export class InvalidWebhookSignatureError extends Error {
   constructor(message = "Token do webhook InfinitePay inválido") {
@@ -333,6 +335,19 @@ export async function processInfinitePayWebhook(
         errorName: dispatchError instanceof Error ? dispatchError.name : "UnknownError",
       });
     });
+    if (!result.alreadyProcessed) {
+      await notifyOrganizationEvent(
+        session.organizationId,
+        "payment_received",
+        "Pagamento recebido",
+        `Pagamento de ${formatMoney(payload.amount / 100)} confirmado.`,
+      ).catch((pushError) => {
+        console.error("CobraDora: pagamento confirmado, mas notificação push falhou", {
+          paymentId: result.paymentId,
+          errorName: pushError instanceof Error ? pushError.name : "UnknownError",
+        });
+      });
+    }
     return { alreadyProcessed: result.alreadyProcessed };
   } catch (error) {
     await db
@@ -423,5 +438,18 @@ export async function checkInfinitePayPayment(input: {
       errorName: dispatchError instanceof Error ? dispatchError.name : "UnknownError",
     });
   });
+  if (!confirmed.alreadyProcessed) {
+    await notifyOrganizationEvent(
+      session.organizationId,
+      "payment_received",
+      "Pagamento recebido",
+      `Pagamento de ${formatMoney(checked.amount / 100)} confirmado.`,
+    ).catch((pushError) => {
+      console.error("CobraDora: pagamento confirmado, mas notificação push falhou", {
+        paymentId: confirmed.paymentId,
+        errorName: pushError instanceof Error ? pushError.name : "UnknownError",
+      });
+    });
+  }
   return { status: "confirmed", alreadyProcessed: confirmed.alreadyProcessed };
 }

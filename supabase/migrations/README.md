@@ -20,6 +20,7 @@ Como o `drizzle-kit migrate` não conseguiu se conectar diretamente a este proje
 12. `0011_demonic_warlock.sql` — adiciona os módulos `dora`/`cobradora`, o WhatsApp do organizador, o consentimento dos contatos financeiros e a outbox persistente de notificações da Meta.
 13. `0012_wandering_blink.sql` — separa na outbox a mensagem de início de ciclo enviada ao organizador da atualização de lista emitida depois de um pagamento.
 14. `0013_glamorous_hulk.sql` — fecha a integridade multi-tenant da outbox, valida a relação entre tipo e contato, adiciona índices de FK e retira a tabela e sua função de trigger dos papéis públicos `anon`/`authenticated` quando eles existem.
+15. `0014_tricky_scalphunter.sql` — cria `device_push_tokens` (token Expo Push por device do app mobile notificador) e `app_notifications` (feed simples de eventos, ex. `payment_received`, independente do sucesso/falha do push).
 
 Depois de rodar as migrations, confira também `financial_contacts`, `organization_settings` e `whatsapp_notifications`. A `0004` interrompe de propósito se encontrar telefone legado inválido, nome normalizado duplicado no mesmo grupo, gateway duplicado ou dupla alocação; a `0013` interrompe se encontrar uma notificação ligada ao tenant errado ou uma combinação incompatível de tipo/contato. Corrija os dados reportados antes de tentar novamente.
 

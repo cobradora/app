@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import type { NextRequest } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { organizations, users } from "@/db/schema";
@@ -7,8 +8,7 @@ import { SESSION_COOKIE_NAME, verifySession, type SessionPayload } from "@/lib/s
 export class UnauthorizedError extends Error {}
 export class ForbiddenError extends Error {}
 
-export async function requireOrganization(): Promise<SessionPayload> {
-  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
+async function resolveSession(token: string | undefined): Promise<SessionPayload> {
   if (!token) throw new UnauthorizedError("Sessão ausente");
 
   let payload: SessionPayload;
@@ -37,6 +37,19 @@ export async function requireOrganization(): Promise<SessionPayload> {
 
   if (!current) throw new UnauthorizedError("Usuário ou organização inativos");
   return current;
+}
+
+export async function requireOrganization(): Promise<SessionPayload> {
+  const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
+  return resolveSession(token);
+}
+
+/** Mesma verificação de requireOrganization, para chamadas do app mobile
+ * autenticadas via `Authorization: Bearer <token>` em vez de cookie. */
+export async function requireOrganizationFromBearerToken(request: NextRequest): Promise<SessionPayload> {
+  const header = request.headers.get("authorization");
+  const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : undefined;
+  return resolveSession(token);
 }
 
 export async function requireOwnerOrAdmin(): Promise<SessionPayload> {

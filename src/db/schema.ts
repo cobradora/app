@@ -75,6 +75,7 @@ export const whatsappDeliveryStatusEnum = pgEnum("whatsapp_delivery_status", [
   "failed",
 ]);
 export const auditActorTypeEnum = pgEnum("audit_actor_type", ["user", "system", "participant"]);
+export const devicePlatformEnum = pgEnum("device_platform", ["ios", "android"]);
 
 // ---------- organizations ----------
 export const organizations = pgTable("organizations", {
@@ -467,4 +468,36 @@ export const rateLimitHits = pgTable("rate_limit_hits", {
   count: integer("count").notNull().default(1),
 }, (table) => ({
   pk: unique("rate_limit_hits_pk").on(table.key, table.windowStart),
+}));
+
+// ---------- device_push_tokens ----------
+// Token Expo Push por device do app mobile (notificador). Reinstalar/logar de
+// novo no mesmo device reusa o mesmo token — por isso o upsert é pelo próprio
+// token, não por usuário.
+export const devicePushTokens = pgTable("device_push_tokens", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  expoPushToken: varchar("expo_push_token", { length: 200 }).notNull(),
+  platform: devicePlatformEnum("platform").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  expoPushTokenUnique: uniqueIndex("device_push_tokens_expo_push_token_unique").on(table.expoPushToken),
+  organizationIndex: index("device_push_tokens_organization_idx").on(table.organizationId),
+}));
+
+// ---------- app_notifications ----------
+// Feed simples de eventos mostrado na lista do app mobile, independente do
+// sucesso/falha do push em si (o push é best-effort; este registro não é).
+export const appNotifications = pgTable("app_notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  kind: varchar("kind", { length: 60 }).notNull(),
+  title: varchar("title", { length: 200 }).notNull(),
+  body: varchar("body", { length: 500 }).notNull(),
+  payload: jsonb("payload"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  organizationIndex: index("app_notifications_organization_idx").on(table.organizationId, table.createdAt),
 }));
