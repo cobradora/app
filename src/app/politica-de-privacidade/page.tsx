@@ -49,7 +49,7 @@ export default function PrivacyPolicyPage() {
         <li><strong>Dados do organizador:</strong> nome, e-mail, telefone de WhatsApp quando informado, senha protegida por hash e demais informações fornecidas no cadastro.</li>
         <li><strong>Dados dos participantes:</strong> nome, número de celular e registros relacionados à autorização ou oposição ao recebimento de mensagens, inseridos pelo organizador ou fornecidos pelo próprio participante ao utilizar a plataforma.</li>
         <li><strong>Dados de cobranças:</strong> grupo relacionado, competência, valor, vencimento, status, forma de pagamento, comprovantes e histórico operacional.</li>
-        <li><strong>Dados do módulo:</strong> módulo Dora ou CobraDora selecionado, configurações de automação, histórico de alterações e, quando houver contratação paga, informações necessárias à sua administração.</li>
+        <li><strong>Dados do módulo:</strong> módulo Grátis ou Premium selecionado, configurações de automação, histórico de alterações e, quando houver contratação paga, informações necessárias à sua administração.</li>
         <li><strong>Dados de mensagens:</strong> destinatário, tipo de comunicação, identificador fornecido pela Meta, tentativas e estados como enviado, entregue, lido ou falhou.</li>
         <li><strong>Dados técnicos:</strong> informações de sessão e registros técnicos necessários à segurança, funcionamento e cumprimento de obrigações legais aplicáveis.</li>
         <li><strong>Cookie de sessão:</strong> <code>cobradora_session</code>, necessário para manter o organizador autenticado, com validade de até 30 dias e configuração httpOnly.</li>

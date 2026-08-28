@@ -10,20 +10,20 @@ const DESCRIPTION =
   "Escolha como cobrar seu grupo: use a Dora grátis para organizar e compartilhar listas ou a CobraDora para automatizar cobranças privadas e atualizações.";
 
 export const metadata: Metadata = {
-  title: "Dora ou CobraDora — Escolha como cobrar seu grupo",
+  title: "Grátis ou Premium — Escolha como cobrar seu grupo",
   description: DESCRIPTION,
   alternates: { canonical: `${APP_BASE_URL}/` },
   openGraph: {
     type: "website",
     locale: "pt_BR",
     siteName: "CobraDora",
-    title: "Dora ou CobraDora — Cobranças no seu ritmo",
+    title: "Grátis ou Premium — Cobranças no seu ritmo",
     description: "Controle grátis pelo painel ou automatize cobranças privadas e atualizações para o organizador.",
     url: `${APP_BASE_URL}/`,
   },
   twitter: {
     card: "summary",
-    title: "Dora ou CobraDora — Assistente de Cobranças",
+    title: "Grátis ou Premium — Assistente de Cobranças",
     description: "Escolha entre controle manual gratuito e cobrança automatizada para seus grupos.",
   },
 };

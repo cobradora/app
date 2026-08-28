@@ -28,8 +28,8 @@ O módulo é uma configuração da organização:
 
 | Módulo | Funcionamento | Custo da plataforma |
 | --- | --- | --- |
-| **Dora** | Mantém o fluxo manual atual. O organizador entra no painel, acompanha as baixas e copia ou compartilha a lista atualizada do grupo. Não envia cobranças privadas nem listas automáticas pelo número da plataforma. | Grátis. |
-| **CobraDora** | Ao iniciar cada ciclo, envia a cobrança consolidada ao WhatsApp de cada responsável financeiro e o resumo `novo_ciclo` ao organizador. Quando um checkout é confirmado, envia ao organizador a `lista_atualizada` do grupo. | Ainda não definido nem implementado. |
+| **Grátis** | Mantém o fluxo manual atual. O organizador entra no painel, acompanha as baixas e copia ou compartilha a lista atualizada do grupo. Não envia cobranças privadas nem listas automáticas pelo número da plataforma. | Grátis. |
+| **Premium** | Ao iniciar cada ciclo, envia a cobrança consolidada ao WhatsApp de cada responsável financeiro e o resumo `novo_ciclo` ao organizador. Quando um checkout é confirmado, envia ao organizador a `lista_atualizada` do grupo. | Ainda não definido nem implementado. |
 
 A seleção de CobraDora, por si só, não cria assinatura, período de teste, renovação ou cobrança da plataforma. Até que preço, contratação e controle de acesso sejam especificados e implementados, o módulo não deve ser apresentado como uma assinatura ativa.
 
@@ -133,9 +133,9 @@ Os envios usam uma fila/ledger persistente. A cobrança privada é deduplicada p
 
 ### Checklist de QA dos módulos
 
-- O cadastro aceita somente `dora` ou `cobradora` e persiste a escolha na organização.
-- Uma organização Dora nunca dispara templates da Meta, mesmo com cobranças abertas.
-- Uma organização CobraDora sem InfiniteTag ativa ou sem telefone do organizador permanece com configuração pendente e não envia automações incompletas.
+- O cadastro aceita somente `grátis` ou `premium` e persiste a escolha na organização.
+- Uma organização Grátis nunca dispara templates da Meta, mesmo com cobranças abertas.
+- Uma organização Premium sem InfiniteTag ativa ou sem telefone do organizador permanece com configuração pendente e não envia automações incompletas.
 - Contato sem opt-in, com opt-out posterior ou com telefone inválido não recebe cobrança privada.
 - A cobrança privada usa o responsável financeiro e não expõe telefone ou segredos em logs e URLs.
 - A repetição do Cron não recria notificações já registradas como aceitas pela Meta; simule também o caso ambíguo em que a resposta externa se perde.

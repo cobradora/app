@@ -9,7 +9,7 @@ export const metadata: Metadata = {
     default: "CobraDora — Cobranças para grupos, do manual ao automático",
     template: "%s · CobraDora",
   },
-  description: "Escolha o Dora gratuito ou automatize cobranças privadas pelo WhatsApp com o CobraDora.",
+  description: "Escolha o modo Grátis ou automatize cobranças privadas pelo WhatsApp com o modo Premium.",
   icons: {
     icon: [{ url: favicon.src, type: "image/png" }],
     shortcut: favicon.src,

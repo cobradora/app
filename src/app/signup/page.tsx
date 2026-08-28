@@ -90,7 +90,7 @@ function SignupForm() {
         <div className="auth-heading">
           <span className="auth-chip"><Sparkles size={15} /> Comece agora</span>
           <h1>Escolha como quer cobrar</h1>
-          <p>Você pode começar grátis com a Dora ou automatizar a rotina com a CobraDora.</p>
+          <p>Você pode começar grátis com a Grátis ou automatizar a rotina com a Premium.</p>
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>
@@ -106,7 +106,7 @@ function SignupForm() {
                   checked={billingModule === "dora"}
                   onChange={() => { setBillingModule("dora"); setError(null); }}
                 />
-                <span className="module-option__top"><strong>Dora</strong><b>R$ 0</b></span>
+                <span className="module-option__top"><strong>Grátis</strong><b>R$ 0</b></span>
                 <small>Você acompanha os pagamentos no painel e copia ou compartilha a lista atualizada.</small>
               </label>
               <label className={`module-option ${billingModule === "cobradora" ? "module-option--selected" : ""}`}>
@@ -117,7 +117,7 @@ function SignupForm() {
                   checked={billingModule === "cobradora"}
                   onChange={() => { setBillingModule("cobradora"); setError(null); }}
                 />
-                <span className="module-option__top"><strong>CobraDora</strong><b>Automação</b></span>
+                <span className="module-option__top"><strong>Premium</strong><b>Automação</b></span>
                 <small>Mensalistas recebem a cobrança no privado e você recebe a lista atualizada.</small>
               </label>
             </div>
@@ -242,7 +242,7 @@ function SignupForm() {
           {error && <p className="form-error" role="alert">{error}</p>}
 
           <button type="submit" className="button button--primary button--full auth-submit" disabled={submitting || !canSubmit}>
-            {submitting ? <><Spinner size={18} /><span>Criando…</span></> : <><span>{billingModule === "dora" ? "Criar conta Dora" : "Continuar com CobraDora"}</span><ArrowRight size={18} /></>}
+            {submitting ? <><Spinner size={18} /><span>Criando…</span></> : <><span>{billingModule === "dora" ? "Criar conta Grátis" : "Continuar com Premium"}</span><ArrowRight size={18} /></>}
           </button>
         </form>
 
