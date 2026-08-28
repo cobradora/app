@@ -868,6 +868,11 @@ ul {
   box-shadow: 0 0 0 2px rgba(240, 107, 131, 0.12);
 }
 
+.module-setting-options > label.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .module-setting-options input {
   flex: 0 0 auto;
   width: 18px;
@@ -2174,6 +2179,16 @@ ul {
   border-color: var(--pink-deep);
   background: var(--pink-pale);
   box-shadow: 0 0 0 3px rgba(240, 107, 131, 0.13);
+}
+
+.module-option--disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.module-option--disabled:hover {
+  transform: none;
+  border-color: var(--line-strong);
 }
 
 .module-option > input {

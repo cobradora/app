@@ -91,6 +91,7 @@ export default function LandingPage() {
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.1]">
               Organize as mensalidades. <span className="text-brand-pink-text underline decoration-brand-chocolate decoration-4">Automatize quando quiser.</span>
             </h1>
+            <p></p>
             <p className="text-lg md:text-xl text-brand-chocolate/80 max-w-xl mx-auto lg:mx-0 font-medium">
               Use a CobraDora gratuitamente para acompanhar pagamentos e compartilhar suas listas. Quando quiser tirar a cobrança da rotina, ative o Premium e deixe a CobraDora fazer esse trabalho por você.
             </p>

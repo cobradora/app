@@ -21,6 +21,10 @@ function isValidBrPhone(value: string): boolean {
   return /^[1-9]\d9\d{8}$/.test(value.replace(/\D/g, ""));
 }
 
+// Temporário: módulo Premium/CobraDora ainda em estabilização (automação via
+// WhatsApp). Reverter pra `false` quando estiver pronto pra reabrir seleção.
+const COBRADORA_TEMPORARILY_DISABLED = true;
+
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -30,7 +34,7 @@ function SignupForm() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [billingModule, setBillingModule] = useState<BillingModule>(
-    searchParams.get("module") === "cobradora" ? "cobradora" : "dora",
+    !COBRADORA_TEMPORARILY_DISABLED && searchParams.get("module") === "cobradora" ? "cobradora" : "dora",
   );
   const [organizerPhone, setOrganizerPhone] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -109,15 +113,16 @@ function SignupForm() {
                 <span className="module-option__top"><strong>Grátis</strong><b>R$ 0</b></span>
                 <small>Você acompanha os pagamentos no painel e copia ou compartilha a lista atualizada.</small>
               </label>
-              <label className={`module-option ${billingModule === "cobradora" ? "module-option--selected" : ""}`}>
+              <label className={`module-option ${billingModule === "cobradora" ? "module-option--selected" : ""} ${COBRADORA_TEMPORARILY_DISABLED ? "module-option--disabled" : ""}`}>
                 <input
                   type="radio"
                   name="billing-module"
                   value="cobradora"
                   checked={billingModule === "cobradora"}
                   onChange={() => { setBillingModule("cobradora"); setError(null); }}
+                  disabled={COBRADORA_TEMPORARILY_DISABLED}
                 />
-                <span className="module-option__top"><strong>Premium</strong><b>Automação</b></span>
+                <span className="module-option__top"><strong>Premium</strong><b>{COBRADORA_TEMPORARILY_DISABLED ? "Em breve" : "Automação"}</b></span>
                 <small>Mensalistas recebem a cobrança no privado e você recebe a lista atualizada.</small>
               </label>
             </div>

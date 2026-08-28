@@ -116,6 +116,9 @@ const DEFAULT_MESSAGE_INTRO = "Olá, pessoal do {grupo}! Aqui está o resumo de 
 const DEFAULT_MESSAGE_OUTRO = "Para pagar, use o link abaixo. Obrigado!";
 const NAME_MAX = 80;
 const MESSAGE_MAX = 500;
+// Temporário: módulo Premium/CobraDora ainda em estabilização (automação via
+// WhatsApp). Reverter pra `false` quando estiver pronto pra reabrir seleção.
+const COBRADORA_TEMPORARILY_DISABLED = true;
 
 function monthLabel(referenceMonth: string): string {
   const [year, month] = referenceMonth.split("-").map(Number);
@@ -1821,9 +1824,9 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                       <input type="radio" name="dashboard-billing-module" checked={billingModuleDraft === "dora"} onChange={() => { setBillingModuleDraft("dora"); setBillingSettingsError(""); }} disabled={!isAdmin || billingSettingsSaving} />
                       <span><strong>Dora</strong><small>Grátis · você copia ou compartilha a lista.</small></span>
                     </label>
-                    <label className={billingModuleDraft === "cobradora" ? "selected" : ""}>
-                      <input type="radio" name="dashboard-billing-module" checked={billingModuleDraft === "cobradora"} onChange={() => { setBillingModuleDraft("cobradora"); setBillingSettingsError(""); }} disabled={!isAdmin || billingSettingsSaving} />
-                      <span><strong>CobraDora</strong><small>Automação · cobrança privada e atualização para você.</small></span>
+                    <label className={`${billingModuleDraft === "cobradora" ? "selected" : ""} ${COBRADORA_TEMPORARILY_DISABLED ? "disabled" : ""}`}>
+                      <input type="radio" name="dashboard-billing-module" checked={billingModuleDraft === "cobradora"} onChange={() => { setBillingModuleDraft("cobradora"); setBillingSettingsError(""); }} disabled={!isAdmin || billingSettingsSaving || COBRADORA_TEMPORARILY_DISABLED} />
+                      <span><strong>CobraDora</strong><small>{COBRADORA_TEMPORARILY_DISABLED ? "Em breve · automação temporariamente indisponível para novas seleções." : "Automação · cobrança privada e atualização para você."}</small></span>
                     </label>
                   </fieldset>
 
