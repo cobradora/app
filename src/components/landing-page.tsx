@@ -7,32 +7,33 @@ import cobraLogo from "@/images/logo-cobra-sem-fundo.png";
 const MODULES = [
   {
     id: "dora",
-    name: "Dora",
+    name: "Grátis",
     eyebrow: "Controle pelo painel",
-    description: "Para quem quer organizar as mensalidades sem custo e prefere conduzir o compartilhamento da lista.",
+    description: "Para quem quer organizar as mensalidades sem custo e prefere conduzir o compartilhamento das cobranças pelo painel.",
     price: "R$ 0",
-    priceDetail: "grátis",
+    priceDetail: "para começar",
     featured: false,
     features: [
       "Painel com pagos e pendentes",
       "Lista atualizada para copiar ou compartilhar",
-      "Checkout e baixa manual",
-      "Conta InfinitePay obrigatória",
+      "Checkout integrado com baixa automática",
+      "Baixa manual quando necessário",
+      "Pagamentos direto na sua InfinitePay",
     ],
   },
   {
     id: "cobradora",
-    name: "CobraDora",
-    eyebrow: "Cobrança automatizada",
-    description: "Para quem quer tirar a cobrança da rotina e acompanhar as atualizações pelo WhatsApp.",
-    price: "Automação",
-    priceDetail: "preço e contratação ainda não definidos",
+    name: "Premium",
+    eyebrow: "Cobrança e acompanhamento automáticos",
+    description: "Para quem quer tirar a cobrança da rotina e deixar a CobraDora acompanhar os pagamentos pelo WhatsApp.",
+    price: "R$ 0,90",
+    priceDetail: "por integrante cadastrado/mês · mínimo de R$ 9,90/mês",
     featured: true,
     features: [
-      "Tudo o que existe na Dora",
-      "Cobrança enviada no privado do mensalista",
-      "Lista atualizada enviada ao organizador",
-      "Conta InfinitePay obrigatória",
+      "Tudo o que existe no modo Grátis",
+      "Cobranças individuais pelo WhatsApp",
+      "Atualizações automáticas ao organizador",
+      "Cobrança calculada pela quantidade de integrantes cadastrados",
     ],
   },
 ] as const;
@@ -88,18 +89,18 @@ export default function LandingPage() {
               ⚡ Simples, prático e sem complicações
             </div>
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.1]">
-              Sua cobrança, do seu jeito: <span className="text-brand-pink-text underline decoration-brand-chocolate decoration-4">manual ou automática</span>.
+              Organize as mensalidades. <span className="text-brand-pink-text underline decoration-brand-chocolate decoration-4">Automatize quando quiser.</span>
             </h1>
             <p className="text-lg md:text-xl text-brand-chocolate/80 max-w-xl mx-auto lg:mx-0 font-medium">
-              Escolha a Dora para organizar e compartilhar as listas pelo painel ou a CobraDora para cobrar no privado e receber as atualizações automaticamente.
+              Use a CobraDora gratuitamente para acompanhar pagamentos e compartilhar suas listas. Quando quiser tirar a cobrança da rotina, ative o Premium e deixe a CobraDora fazer esse trabalho por você.
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4 pt-4">
               <Link href="/signup?module=dora" className="btn-3d w-full sm:w-auto text-center bg-brand-pink text-brand-chocolate font-bold text-base px-8 py-4 rounded-full border-2 border-brand-chocolate hover:bg-white transition-all">
-                Começar com a Dora
+                Começar grátis
               </Link>
               <a href="#modulos" className="w-full sm:w-auto text-center bg-transparent text-brand-chocolate font-bold text-base px-8 py-4 rounded-full border-2 border-transparent hover:border-brand-chocolate/20 transition-all">
-                Comparar módulos →
+                Conhecer o Premium →
               </a>
             </div>
 
@@ -183,9 +184,9 @@ export default function LandingPage() {
       <section id="como-funciona" className="py-20 bg-white border-y-2 border-brand-chocolate/10">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center max-w-2xl mx-auto mb-16 space-y-4">
-            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight">Uma base simples, dois modos de cobrar</h2>
+            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight">Uma base simples, dois modos de usar</h2>
             <p className="text-base text-brand-chocolate/70 font-medium">
-              Cadastre uma vez, receba pela InfinitePay e escolha quanto da rotina quer automatizar.
+              Cadastre uma vez, receba pela InfinitePay e escolha quanto da rotina quer deixar com a CobraDora.
             </p>
           </div>
 
@@ -202,15 +203,15 @@ export default function LandingPage() {
               <div className="w-12 h-12 bg-brand-pink rounded-full border-2 border-brand-chocolate flex items-center justify-center font-extrabold text-lg mb-6 shadow-[2px_2px_0px_#3B2117]">2</div>
               <h3 className="text-lg font-extrabold mb-3">Conecte a InfinitePay</h3>
               <p className="text-sm text-brand-chocolate/80 leading-relaxed font-medium">
-                A conta InfinitePay é obrigatória nos dois módulos. Você conecta sua InfiniteTag e os pagamentos do checkout vão direto para sua conta.
+                Para receber pelo checkout, conecte sua InfiniteTag. Os pagamentos são enviados diretamente para sua conta InfinitePay.
               </p>
             </div>
 
             <div className="bg-brand-creme border-2 border-brand-chocolate p-8 rounded-2xl relative shadow-[4px_4px_0px_#3B2117]">
               <div className="w-12 h-12 bg-brand-pink rounded-full border-2 border-brand-chocolate flex items-center justify-center font-extrabold text-lg mb-6 shadow-[2px_2px_0px_#3B2117]">3</div>
-              <h3 className="text-lg font-extrabold mb-3">Escolha Dora ou CobraDora</h3>
+              <h3 className="text-lg font-extrabold mb-3">Escolha como quer cobrar</h3>
               <p className="text-sm text-brand-chocolate/80 leading-relaxed font-medium">
-                Na Dora, você entra no painel e compartilha a lista. Na CobraDora, os mensalistas recebem no privado e a atualização chega até você.
+                No modo Grátis, você organiza e acompanha tudo pelo painel. No Premium, a CobraDora também assume a rotina de cobrança pelo WhatsApp.
               </p>
             </div>
           </div>
@@ -223,10 +224,10 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
             <div className="lg:col-span-5 space-y-6">
               <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight leading-tight">
-                O mesmo controle, no nível de automação que faz sentido para você.
+                Você escolhe quanto da cobrança quer deixar com a CobraDora.
               </h2>
               <p className="text-brand-chocolate/80 font-medium leading-relaxed">
-                Comece com a Dora sem custo e mantenha o compartilhamento nas suas mãos. Quando quiser tirar a cobrança da rotina, escolha a CobraDora.
+                Comece organizando tudo pelo painel. Quando quiser reduzir o trabalho manual, ative o Premium e deixe a CobraDora assumir a rotina de cobrança.
               </p>
               <div className="space-y-4 pt-2">
                 <div className="flex items-start gap-3">
@@ -234,8 +235,8 @@ export default function LandingPage() {
                     <span className="text-brand-chocolate font-bold text-xs">✓</span>
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm">Dora: você conduz</h4>
-                    <p className="text-xs text-brand-chocolate/70">Consulte o painel, copie a lista atualizada e compartilhe quando quiser.</p>
+                    <h4 className="font-bold text-sm">Grátis: você conduz</h4>
+                    <p className="text-xs text-brand-chocolate/70">Consulte o painel, acompanhe os pagamentos e compartilhe a lista quando quiser.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">
@@ -243,8 +244,8 @@ export default function LandingPage() {
                     <span className="text-brand-chocolate font-bold text-xs">✓</span>
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm">CobraDora: a rotina anda sozinha</h4>
-                    <p className="text-xs text-brand-chocolate/70">A cobrança chega no privado e você recebe as mudanças da lista.</p>
+                    <h4 className="font-bold text-sm">Premium: a rotina anda sozinha</h4>
+                    <p className="text-xs text-brand-chocolate/70">A CobraDora envia cobranças individuais pelo WhatsApp e mantém você atualizado sobre os pagamentos.</p>
                   </div>
                 </div>
               </div>
@@ -267,10 +268,10 @@ export default function LandingPage() {
                     </div>
                     <div className="bg-white border border-brand-chocolate/10 p-3 rounded-2xl rounded-tl-none shadow-sm text-xs space-y-2">
                       <p className="font-bold text-brand-chocolate">CobraDora para o mensalista</p>
-                      <p>Olá, Willyan! Sua mensalidade do grupo kmura está disponível.</p>
+                      <p>Olá, Cris! Sua mensalidade do grupo Sport de Quinta está disponível.</p>
                       <p className="font-semibold">Valor: R$ 50,00 · vencimento dia 10</p>
                       <p className="bg-brand-creme p-2 rounded border border-brand-chocolate/10 font-mono text-[10px] break-all">
-                        https://cobradora.com.br/g/kmura-willyan
+                        https://cobradora.com.br/g/sport-de-quinta-cris
                       </p>
                       <p className="text-[9px] opacity-60">O pagamento é confirmado com segurança pela InfinitePay.</p>
                     </div>
@@ -304,9 +305,9 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center max-w-2xl mx-auto mb-12 space-y-4">
             <span className="inline-flex items-center rounded-full bg-brand-pink-light px-4 py-1.5 text-xs font-extrabold uppercase tracking-wider">Escolha seu modo</span>
-            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight">Dora ou CobraDora?</h2>
+            <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight">Grátis ou Premium?</h2>
             <p className="text-base text-brand-chocolate/70 font-medium">
-              Os dois módulos organizam grupos, pagamentos e listas. A diferença é quem conduz a cobrança: você ou a automação.
+              Nos dois modos, você organiza grupos, pagamentos e listas. A diferença é quanto da rotina de cobrança quer deixar com a CobraDora.
             </p>
           </div>
 
@@ -352,7 +353,7 @@ export default function LandingPage() {
                         : "bg-white text-brand-chocolate py-3 hover:bg-brand-pink"
                     }`}
                   >
-                    Escolher {module.name}
+                    {module.id === "dora" ? "Começar grátis" : "Ativar Premium"}
                   </Link>
                 </div>
               </div>
@@ -360,7 +361,7 @@ export default function LandingPage() {
           </div>
 
           <div className="max-w-5xl mx-auto mt-10 rounded-2xl border border-brand-chocolate/15 bg-brand-pink-light p-5 text-center text-sm font-semibold text-brand-chocolate/80">
-            A InfinitePay é necessária nos dois módulos porque o checkout envia cada pagamento diretamente para a conta do organizador.
+            Para receber pelo checkout, é necessário conectar uma conta InfinitePay. Cada pagamento é enviado diretamente para a conta do organizador.
           </div>
         </div>
       </section>
@@ -372,30 +373,30 @@ export default function LandingPage() {
 
           <div className="space-y-6">
             <div className="bg-white border-2 border-brand-chocolate p-6 rounded-2xl">
-              <h3 className="font-extrabold text-base mb-2">Qual é a diferença entre Dora e CobraDora?</h3>
+              <h3 className="font-extrabold text-base mb-2">Qual é a diferença entre o modo Grátis e o Premium?</h3>
               <p className="text-sm text-brand-chocolate/80 leading-relaxed font-medium">
-                Na Dora, que é grátis, você entra no painel para copiar ou compartilhar a lista atualizada. Na CobraDora, os mensalistas recebem a cobrança no privado e a lista atualizada é enviada ao organizador.
+                No modo Grátis, você acompanha os pagamentos pelo painel e conduz o compartilhamento das cobranças. No Premium, cada mensalista recebe sua cobrança individualmente pelo WhatsApp e você acompanha automaticamente as atualizações de pagamento.
               </p>
             </div>
 
             <div className="bg-white border-2 border-brand-chocolate p-6 rounded-2xl">
               <h3 className="font-extrabold text-base mb-2">Preciso ter conta na InfinitePay?</h3>
               <p className="text-sm text-brand-chocolate/80 leading-relaxed font-medium">
-                Sim. A conta InfinitePay é obrigatória tanto na Dora quanto na CobraDora. Depois de criar sua conta, conecte a InfiniteTag em Configurações para que os pagamentos do checkout caiam direto para você.
+                Sim. Para receber pelo checkout, é necessário conectar uma conta InfinitePay. Depois, basta informar sua InfiniteTag em Configurações para que os pagamentos sejam enviados diretamente para você.
               </p>
             </div>
 
             <div className="bg-white border-2 border-brand-chocolate p-6 rounded-2xl">
               <h3 className="font-extrabold text-base mb-2">Ainda posso compartilhar ou dar baixa manualmente?</h3>
               <p className="text-sm text-brand-chocolate/80 leading-relaxed font-medium">
-                Sim. As ações manuais continuam disponíveis nos dois módulos para você copiar a lista, compartilhar o link ou registrar um pagamento recebido fora do checkout.
+                Sim. As ações manuais continuam disponíveis nos dois modos para você copiar a lista, compartilhar o link ou registrar um pagamento recebido fora do checkout.
               </p>
             </div>
 
             <div className="bg-white border-2 border-brand-chocolate p-6 rounded-2xl">
-              <h3 className="font-extrabold text-base mb-2">Quanto custa a CobraDora?</h3>
+              <h3 className="font-extrabold text-base mb-2">Quanto custa o Premium?</h3>
               <p className="text-sm text-brand-chocolate/80 leading-relaxed font-medium">
-                A CobraDora é o módulo de automação. Preço e contratação ainda não foram definidos; nenhuma cobrança é feita apenas por selecionar o módulo no cadastro.
+                O Premium custa R$ 0,90 por integrante cadastrado por mês, com valor mínimo de R$ 9,90 mensais. O valor é calculado pela quantidade total de integrantes cadastrados no sistema.
               </p>
             </div>
           </div>
@@ -411,7 +412,7 @@ export default function LandingPage() {
             </div>
             <div>
               <span className="font-extrabold text-lg tracking-tight block leading-none">CobraDora</span>
-              <span className="text-[10px] opacity-60">© 2026 — Todos os direitos reservados.</span>
+              <span className="text-[10px] opacity-60">CobraDora by Mentel Soluções Digitais — Todos os direitos reservados.</span>
             </div>
           </div>
 

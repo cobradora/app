@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ArrowLeft,
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronDown,
   ClipboardPaste,
   Clock3,
   CreditCard,
@@ -279,7 +281,8 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   const [billingSettingsSaving, setBillingSettingsSaving] = useState(false);
   const [billingSettingsError, setBillingSettingsError] = useState("");
 
-  const [mobileTab, setMobileTab] = useState<"home" | "grupos" | "pendencias" | "ajustes">("home");
+  const [mobileTab, setMobileTab] = useState<"home" | "grupos" | "ajustes">("home");
+  const [pendingCardExpanded, setPendingCardExpanded] = useState(false);
 
   const [memberModal, setMemberModal] = useState(false);
   const [memberForm, setMemberForm] = useState({ name: "", phone: "", billingAmount: "", tag: "", whatsappConsent: false });
@@ -557,25 +560,22 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   useEffect(() => {
     if (!openGroupId) return;
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape" && !memberModal && !groupEditModal && !participantModal && !importModal) {
-        setOpenGroupId(null);
-      }
+      if (event.key === "Escape") closeGroupsScreen();
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
+    // closeGroupsScreen le o state mais recente a cada chamada; não precisa
+    // entrar nas deps porque é redefinida a cada render com as mesmas refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openGroupId, memberModal, groupEditModal, participantModal, importModal]);
 
   useEffect(() => {
-    const hasOverlay = Boolean(
-      openGroupId ||
-      gatewayModal ||
-      memberModal ||
-      groupModal ||
-      settleModal ||
-      groupEditModal ||
-      participantModal ||
-      importModal,
-    );
+    // openGroupId/groupModal/memberModal/groupEditModal/participantModal/
+    // importModal deixaram de ser overlays — viraram telas nativas dentro do
+    // fluxo normal da página (screen-panel), então não travam mais o scroll
+    // do body. Só gatewayModal e settleModal continuam sendo diálogos de
+    // verdade sobre o conteúdo.
+    const hasOverlay = Boolean(gatewayModal || settleModal);
     if (!hasOverlay) return;
     const previousOverflow = document.body.style.overflow;
     const previousOverscroll = document.body.style.overscrollBehavior;
@@ -587,17 +587,35 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     };
   }, [
     gatewayModal,
-    groupEditModal,
-    groupModal,
-    importModal,
-    memberModal,
-    openGroupId,
-    participantModal,
     settleModal,
   ]);
 
   function groupOf(groupId: string) {
     return groups.find((group) => group.id === groupId);
+  }
+
+  // Telas nativas de grupo: cada uma delas é hoje representada pelo mesmo
+  // state que antes abria um modal/drawer. Nenhum modal fica aberto sem que
+  // um "mais interno" também esteja — então a ordem de checagem abaixo forma
+  // uma pilha implícita (a tela mais interna vence), sem precisar de um
+  // state de pilha à parte. Fechar a tela do topo revela a anterior sozinho.
+  type GroupsScreenKind = "list" | "detail" | "create" | "edit" | "add-member" | "edit-participant" | "import";
+  function groupsScreenKind(): GroupsScreenKind {
+    if (importModal) return "import";
+    if (participantModal) return "edit-participant";
+    if (memberModal) return "add-member";
+    if (groupEditModal) return "edit";
+    if (groupModal) return "create";
+    if (openGroupId) return "detail";
+    return "list";
+  }
+  function closeGroupsScreen() {
+    if (importModal) return setImportModal(false);
+    if (participantModal) return setParticipantModal(null);
+    if (memberModal) return setMemberModal(false);
+    if (groupEditModal) return setGroupEditModal(false);
+    if (groupModal) return setGroupModal(false);
+    if (openGroupId) return setOpenGroupId(null);
   }
 
   function openGatewayModal() {
@@ -1429,7 +1447,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
             <p>Acompanhe recebimentos, resolva pendências e cuide dos seus grupos em um só lugar.</p>
           </div>
           {isAdmin && (
-            <button className="button button--primary" type="button" onClick={() => setGroupModal(true)}>
+            <button className="button button--primary" type="button" onClick={() => { setMobileTab("grupos"); setGroupModal(true); }}>
               <Plus size={18} /> Novo grupo
             </button>
           )}
@@ -1457,91 +1475,303 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
             <span className="summary-card__icon"><CheckCircle2 size={21} /></span>
             <div><p>Recebido</p><strong>{formatMoney(totals.received)}</strong><small>{totals.paidCount} pagamentos confirmados</small></div>
           </article>
-          <article className="summary-card summary-card--pending">
-            <span className="summary-card__icon"><Clock3 size={21} /></span>
-            <div><p>Pendente</p><strong>{formatMoney(totals.pending)}</strong><small>{totals.pendingCount} cobranças em aberto</small></div>
+          <article className={`summary-card summary-card--pending ${pendingCardExpanded ? "summary-card--expanded" : ""}`}>
+            <button
+              type="button"
+              className="summary-card__toggle"
+              onClick={() => setPendingCardExpanded((value) => !value)}
+              aria-expanded={pendingCardExpanded}
+              aria-controls="pending-card-expansion"
+            >
+              <span className="summary-card__icon"><Clock3 size={21} /></span>
+              <div><p>Pendente</p><strong>{formatMoney(totals.pending)}</strong><small>{totals.pendingCount} cobranças em aberto</small></div>
+              <ChevronDown className="summary-card__chevron" size={18} aria-hidden="true" />
+            </button>
+            {pendingCardExpanded && (
+              <div id="pending-card-expansion" className="pending-card-expansion">
+                {pendingCharges.length === 0 ? (
+                  <div className="empty-state empty-state--success"><CheckCircle2 size={26} /><strong>Tudo certo por aqui</strong><p>Não há cobranças pendentes nesta competência.</p></div>
+                ) : (
+                  Array.from(
+                    pendingCharges.reduce((groupedCharges, charge) => {
+                      const list = groupedCharges.get(charge.groupId) ?? [];
+                      list.push(charge);
+                      groupedCharges.set(charge.groupId, list);
+                      return groupedCharges;
+                    }, new Map<string, DashboardCharge[]>()),
+                  ).map(([groupId, groupCharges]) => (
+                    <div key={groupId} className="pending-card-group">
+                      <p className="pending-card-group__title">{groupOf(groupId)?.name ?? "Grupo"}</p>
+                      <ul className="pending-list">
+                        {groupCharges.map((charge) => (
+                          <li key={charge.id} className="pending-row">
+                            <span className="person-avatar">{getInitials(charge.participantName ?? "Participante")}</span>
+                            <div className="pending-row__person">
+                              <strong>{charge.participantName ?? "Participante"}</strong>
+                              <span>{charge.rawStatus === "checkout_pending" ? "checkout iniciado" : "aguardando pagamento"}</span>
+                            </div>
+                            <strong className="pending-row__amount">{formatMoney(charge.amount)}</strong>
+                            {isAdmin && charge.rawStatus === "open" ? (
+                              <span className="pending-row__actions">
+                                <button className="button button--secondary button--small" type="button" onClick={() => openSettleModal(charge.id)}>Dar baixa</button>
+                                <button className="button button--danger button--small" type="button" onClick={() => cancelCharge(charge.id)} disabled={cancelingChargeId === charge.id}>{cancelingChargeId === charge.id ? <Spinner size={15} /> : <X size={15} />} Cancelar dívida</button>
+                              </span>
+                            ) : charge.rawStatus === "checkout_pending" ? (
+                              <span className="pending-row__actions">
+                                <span className="status-pill">Em conciliação</span>
+                                {isAdmin && (
+                                  <button className="button button--secondary button--small" type="button" onClick={() => releaseStuckCheckout(charge.id)} disabled={releasingChargeId === charge.id}>
+                                    {releasingChargeId === charge.id && <Spinner size={15} />} Liberar cobrança
+                                  </button>
+                                )}
+                              </span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </article>
         </section>
 
-        <section id="grupos" className={`surface groups-section ${mobileTab === "home" || mobileTab === "grupos" ? "" : "mobile-tab-hidden"}`} aria-labelledby="groups-title">
-          <div className="section-heading">
-            <div><p className="section-kicker">Seus grupos</p><h2 id="groups-title">Abra um grupo para gerenciar</h2></div>
-            <div className="section-heading__actions">
-              <span className="count-pill">{groupsLoading ? "…" : activeGroups.length}</span>
-              {isAdmin && (
-                <button className="button button--primary button--small mobile-only" type="button" onClick={() => setGroupModal(true)}>
-                  <Plus size={16} /> Novo grupo
-                </button>
+        <section id="grupos" className={`surface groups-section ${mobileTab === "grupos" || (mobileTab === "home" && groupsScreenKind() === "list") ? "" : "mobile-tab-hidden"}`} aria-labelledby="groups-title">
+          {groupsScreenKind() === "list" && (
+            <>
+              <div className="section-heading">
+                <div><p className="section-kicker">Seus grupos</p><h2 id="groups-title">Abra um grupo para gerenciar</h2></div>
+                <div className="section-heading__actions">
+                  <span className="count-pill">{groupsLoading ? "…" : activeGroups.length}</span>
+                  {isAdmin && (
+                    <button className="button button--primary button--small mobile-only" type="button" onClick={() => { setMobileTab("grupos"); setGroupModal(true); }}>
+                      <Plus size={16} /> Novo grupo
+                    </button>
+                  )}
+                </div>
+              </div>
+              {groupsLoading ? (
+                <div className="skeleton-row" aria-label="Carregando grupos"><span /><span /><span /></div>
+              ) : activeGroups.length === 0 ? (
+                <div className="empty-state"><UsersRound size={28} /><strong>Seu primeiro grupo começa aqui</strong><p>Crie um grupo e adicione os participantes que serão cobrados.</p></div>
+              ) : (
+                <div className="group-badges" role="group" aria-label="Grupos ativos">
+                  {activeGroups.map((group) => {
+                    const groupRows = periodCharges.filter((charge) => charge.groupId === group.id);
+                    const pending = groupRows.filter((charge) => charge.status === "pending").length;
+                    return (
+                      <button
+                        type="button"
+                        key={group.id}
+                        className="group-badge"
+                        style={{ "--group-color": group.color } as React.CSSProperties}
+                        onClick={() => { setLateCycleNotice(""); setMobileTab("grupos"); setOpenGroupId(group.id); }}
+                        aria-label={`Abrir ${group.name}, ${group.dueDay ? `renovação dia ${group.dueDay}` : "renovação manual"}, ${pending} pendências`}
+                      >
+                        <span className="group-badge__dot" />
+                        <span><strong>{group.name}</strong><small>{group.dueDay ? `Dia ${group.dueDay}` : "Manual"} · {pending ? `${pending} pendente${pending > 1 ? "s" : ""}` : "em dia"}</small></span>
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-            </div>
-          </div>
-          {groupsLoading ? (
-            <div className="skeleton-row" aria-label="Carregando grupos"><span /><span /><span /></div>
-          ) : activeGroups.length === 0 ? (
-            <div className="empty-state"><UsersRound size={28} /><strong>Seu primeiro grupo começa aqui</strong><p>Crie um grupo e adicione os participantes que serão cobrados.</p></div>
-          ) : (
-            <div className="group-badges" role="group" aria-label="Grupos ativos">
-              {activeGroups.map((group) => {
-                const groupRows = periodCharges.filter((charge) => charge.groupId === group.id);
-                const pending = groupRows.filter((charge) => charge.status === "pending").length;
-                return (
-                  <button
-                    type="button"
-                    key={group.id}
-                    className="group-badge"
-                    style={{ "--group-color": group.color } as React.CSSProperties}
-                    onClick={() => { setLateCycleNotice(""); setOpenGroupId(group.id); }}
-                    aria-label={`Abrir ${group.name}, ${group.dueDay ? `renovação dia ${group.dueDay}` : "renovação manual"}, ${pending} pendências`}
-                  >
-                    <span className="group-badge__dot" />
-                    <span><strong>{group.name}</strong><small>{group.dueDay ? `Dia ${group.dueDay}` : "Manual"} · {pending ? `${pending} pendente${pending > 1 ? "s" : ""}` : "em dia"}</small></span>
+            </>
+          )}
+
+          {groupsScreenKind() === "detail" && openGroup && (
+            <div className="screen-panel">
+              <div className="screen-panel__header">
+                <button className="icon-button icon-button--large" type="button" onClick={closeGroupsScreen} aria-label="Voltar para grupos"><ArrowLeft size={21} /></button>
+                <div className="screen-panel__title">
+                  <p className="section-kicker">Detalhes do grupo</p>
+                  <h2>{openGroup.name}</h2>
+                  <span>Valor sugerido {formatMoney(openGroup.amount)} · {openGroup.dueDay ? `renovação dia ${openGroup.dueDay}` : "renovação manual"}</span>
+                </div>
+                {isAdmin && !openGroup.dueDay && (
+                  <button className="button button--secondary button--small" type="button" onClick={renewGroupCycle} disabled={renewingCycle}>
+                    {renewingCycle ? <Spinner size={15} /> : <RotateCw size={15} />} {renewingCycle ? "Renovando…" : "Renovar ciclo"}
                   </button>
-                );
-              })}
+                )}
+              </div>
+              <div className="screen-panel__body">
+                {lateCycleNotice && <div className="inline-alert" role="status"><AlertTriangle size={19} /><p><strong>Próximo ciclo</strong>{lateCycleNotice}</p><button type="button" onClick={() => setLateCycleNotice("")} aria-label="Dispensar aviso"><X size={16} /></button></div>}
+                <div className="drawer-metrics">
+                  <div><span>Previsto</span><strong>{formatMoney(openGroupCharges.reduce((total, charge) => total + charge.amount, 0))}</strong></div>
+                  <div><span>Recebido</span><strong>{formatMoney(openGroupPaid.reduce((total, charge) => total + charge.amount, 0))}</strong></div>
+                  <div><span>Pendente</span><strong>{formatMoney(openGroupPending.reduce((total, charge) => total + charge.amount, 0))}</strong></div>
+                </div>
+                <div className="drawer-actions">
+                  <button className="button button--secondary" type="button" onClick={() => copyText(memberLink(openGroup), `Link de ${openGroup.name} copiado.`)}><Link2 size={17} /> Copiar link</button>
+                  <button className="button button--secondary" type="button" onClick={() => shareMessage(openGroup.name, buildChargeMessage(openGroup))}><Share2 size={17} /> Compartilhar</button>
+                  {isAdmin && <button className="button button--secondary" type="button" onClick={() => openGroupEditModal(openGroup)}><Pencil size={17} /> Editar</button>}
+                </div>
+                <section className="drawer-participants" aria-labelledby="participants-title">
+                  <div className="section-heading"><div><p className="section-kicker">Pessoas</p><h3 id="participants-title">Participantes ({openGroupParticipants.length})</h3></div>{isAdmin && <div className="inline-actions"><button className="button button--secondary button--small" type="button" onClick={() => setImportModal(true)}><ClipboardPaste size={16} /> Importar</button><button className="button button--primary button--small" type="button" onClick={() => openMemberModal(openGroup)}><Plus size={16} /> Adicionar</button></div>}</div>
+                  {openGroupParticipants.length === 0 ? <div className="empty-state"><UsersRound size={27} /><strong>Nenhum participante ainda</strong><p>Adicione uma pessoa ou importe uma lista.</p></div> : <ul className="participant-list">{openGroupParticipants.map((person) => {
+                    const charge = openGroupCharges.find((item) => item.participantId === person.id);
+                    const label = !charge ? "Entra no próximo ciclo" : charge.status === "paid" ? `Pago${charge.paidAt ? ` em ${formatDate(charge.paidAt)}` : ""}` : charge.rawStatus === "checkout_pending" ? "Checkout em andamento" : "Aguardando pagamento";
+                    const individualAmount = person.billingAmounts[openGroup.id];
+                    const tag = person.tags[openGroup.id];
+                    return <li key={person.id}><button type="button" className="participant-button" onClick={() => isAdmin && openParticipantModal(openGroup.id, person)} disabled={!isAdmin}><span className={`status-dot ${charge?.status === "paid" ? "status-dot--paid" : !charge ? "status-dot--next" : ""}`} /><span className="person-avatar">{getInitials(person.name)}</span><span className="participant-button__main"><strong>{person.name}</strong><small>{person.phone} · {label}</small>{tag && <span className="tag-chip">{tag}</span>}</span><span className="participant-button__billing"><small>Valor individual</small><strong>{individualAmount ? formatMoney(individualAmount / 100) : charge ? formatMoney(charge.amount) : formatMoney(openGroup.amount)}</strong></span>{isAdmin && <Pencil className="participant-button__edit" size={16} aria-hidden="true" />}</button>{isAdmin && charge?.rawStatus === "open" ? <span className="participant-settle-actions"><button type="button" className="button button--secondary button--small participant-settle" onClick={() => openSettleModal(charge.id)}>Dar baixa</button><button type="button" className="icon-button icon-button--danger" onClick={() => cancelCharge(charge.id)} aria-label={`Cancelar cobrança de ${person.name}`}><X size={15} /></button></span> : isAdmin && charge?.rawStatus === "checkout_pending" ? <span className="participant-settle-actions"><button type="button" className="button button--secondary button--small participant-settle" onClick={() => releaseStuckCheckout(charge.id)} disabled={releasingChargeId === charge.id}>{releasingChargeId === charge.id ? <Spinner size={15} /> : null} Liberar cobrança</button></span> : null}</li>;
+                  })}</ul>}
+                </section>
+              </div>
+            </div>
+          )}
+
+          {groupsScreenKind() === "create" && (
+            <div className="screen-panel">
+              <div className="screen-panel__header">
+                <button className="icon-button icon-button--large" type="button" onClick={closeGroupsScreen} disabled={creatingGroup} aria-label="Voltar para grupos"><ArrowLeft size={21} /></button>
+                <div className="screen-panel__title"><h2>Novo grupo</h2></div>
+              </div>
+              <div className="screen-panel__body modal-card">
+                <label htmlFor="group-name">Nome do grupo</label>
+                <input id="group-name" maxLength={NAME_MAX} value={groupForm.name} onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })} placeholder="Vôlei de quinta" autoFocus disabled={creatingGroup} />
+                <label htmlFor="group-sport">Modalidade (opcional)</label>
+                <input id="group-sport" maxLength={40} value={groupForm.sport} onChange={(event) => setGroupForm({ ...groupForm, sport: event.target.value })} placeholder="Vôlei" disabled={creatingGroup} />
+                <div className="field-grid">
+                  <div><label htmlFor="group-amount">Sugestão de valor</label><div className="input-prefix"><span>R$</span><input id="group-amount" value={groupForm.amount} onChange={(event) => setGroupForm({ ...groupForm, amount: event.target.value.replace(/[^\d,.]/g, "") })} inputMode="decimal" placeholder="80,00" disabled={creatingGroup} /></div><p className="field-hint">Preenche novos cadastros, mas cada participante pode ter seu próprio valor.</p></div>
+                  <div><label htmlFor="group-day">Renovação</label><div className="input-prefix"><span>dia</span><input id="group-day" type="number" min={1} max={28} inputMode="numeric" placeholder="manual" value={groupForm.billingDay} onChange={(event) => setGroupForm({ ...groupForm, billingDay: event.target.value })} disabled={creatingGroup} /></div><p className="field-hint">Deixe em branco para renovar manualmente.</p></div>
+                </div>
+                {groupCreateError && <p className="form-error" role="alert">{groupCreateError}</p>}
+                <button className="button button--primary button--full" type="button" onClick={createGroup} disabled={creatingGroup || !groupForm.name.trim()}>{creatingGroup && <Spinner />}{creatingGroup ? "Criando…" : "Criar grupo"}</button>
+              </div>
+            </div>
+          )}
+
+          {groupsScreenKind() === "add-member" && openGroup && (
+            <div className="screen-panel">
+              <div className="screen-panel__header">
+                <button className="icon-button icon-button--large" type="button" onClick={closeGroupsScreen} disabled={memberSaving} aria-label="Voltar para o grupo"><ArrowLeft size={21} /></button>
+                <div className="screen-panel__title"><h2>Adicionar a {openGroup.name}</h2></div>
+              </div>
+              <div className="screen-panel__body modal-card">
+                <p className="modal-copy">Se o ciclo deste mês já foi renovado, a pessoa entrará apenas na próxima cobrança.</p>
+                <label htmlFor="member-name">Nome</label>
+                <input id="member-name" maxLength={NAME_MAX} value={memberForm.name} onChange={(event) => setMemberForm({ ...memberForm, name: event.target.value })} placeholder="Nome do participante" autoFocus disabled={memberSaving} />
+                <label htmlFor="member-phone">Celular com DDD</label>
+                <input id="member-phone" type="tel" inputMode="numeric" maxLength={15} value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: formatPhoneInput(event.target.value) })} placeholder="(11) 99999-9999" disabled={memberSaving} />
+                <label htmlFor="member-billing-amount">Valor deste participante</label>
+                <div className="input-prefix"><span>R$</span><input id="member-billing-amount" inputMode="decimal" value={memberForm.billingAmount} onChange={(event) => setMemberForm({ ...memberForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={memberSaving} /></div>
+                <p className="field-hint">A sugestão de {formatMoney(openGroup.amount)} veio do grupo. Ajuste aqui sem alterar os demais participantes.</p>
+                <label htmlFor="member-tag">Categoria (opcional)</label>
+                <input id="member-tag" maxLength={60} value={memberForm.tag} onChange={(event) => setMemberForm({ ...memberForm, tag: event.target.value })} placeholder="Ex.: Sub-15" disabled={memberSaving} />
+                {billingSettings?.billingModule === "cobradora" && <label className="whatsapp-consent"><input type="checkbox" checked={memberForm.whatsappConsent} onChange={(event) => setMemberForm({ ...memberForm, whatsappConsent: event.target.checked })} disabled={memberSaving} /><span><strong>Registrar autorização para cobrança privada no WhatsApp</strong><small>Marque somente com autorização explícita. Desmarcado, o cadastro preserva uma autorização já existente para este número.</small></span></label>}
+                {memberError && <p className="form-error" role="alert">{memberError}</p>}
+                <button className="button button--primary button--full" type="button" onClick={() => addMember(openGroup.id)} disabled={memberSaving || !memberForm.name.trim() || !memberForm.phone.trim() || !memberForm.billingAmount.trim()}>{memberSaving && <Spinner />}{memberSaving ? "Adicionando…" : "Adicionar participante"}</button>
+              </div>
+            </div>
+          )}
+
+          {groupsScreenKind() === "edit" && openGroup && (
+            <div className="screen-panel">
+              <div className="screen-panel__header">
+                <button className="icon-button icon-button--large" type="button" onClick={closeGroupsScreen} disabled={groupSaving} aria-label="Voltar para o grupo"><ArrowLeft size={21} /></button>
+                <div className="screen-panel__title"><h2>Editar grupo</h2></div>
+              </div>
+              <div className="screen-panel__body modal-card modal-card--wide">
+                <label htmlFor="edit-group-name">Nome do grupo</label>
+                <input id="edit-group-name" maxLength={NAME_MAX} value={groupEditName} onChange={(event) => setGroupEditName(event.target.value)} autoFocus disabled={groupSaving} />
+                <div className="field-grid">
+                  <div><label htmlFor="edit-group-amount">Sugestão para novos participantes</label><div className="input-prefix"><span>R$</span><input id="edit-group-amount" inputMode="decimal" value={groupEditAmount} onChange={(event) => setGroupEditAmount(event.target.value.replace(/[^\d,.]/g, ""))} placeholder="80,00" disabled={groupSaving} /></div><p className="field-hint">Esta sugestão não altera o valor dos participantes que já estão cadastrados.</p></div>
+                  <div><label htmlFor="edit-group-day">Dia de renovação</label><div className="input-prefix"><span>dia</span><input id="edit-group-day" type="number" min={1} max={28} inputMode="numeric" placeholder="manual" value={groupEditDay} onChange={(event) => setGroupEditDay(event.target.value)} disabled={groupSaving} /></div><p className="field-hint">Em branco = renovação manual (sem cron automático).</p></div>
+                </div>
+
+                <div className="message-editor">
+                  <div className="message-fields">
+                    <label htmlFor="edit-message-intro">Introdução <span>{groupEditMessageIntro.length}/{MESSAGE_MAX}</span></label>
+                    <textarea id="edit-message-intro" rows={4} maxLength={MESSAGE_MAX} value={groupEditMessageIntro} onChange={(event) => setGroupEditMessageIntro(event.target.value)} disabled={groupSaving} />
+                    <label htmlFor="edit-message-outro">Encerramento <span>{groupEditMessageOutro.length}/{MESSAGE_MAX}</span></label>
+                    <textarea id="edit-message-outro" rows={4} maxLength={MESSAGE_MAX} value={groupEditMessageOutro} onChange={(event) => setGroupEditMessageOutro(event.target.value)} disabled={groupSaving} />
+                    <fieldset className="message-filter">
+                      <legend>Listar na mensagem</legend>
+                      <label><input type="radio" name="edit-message-filter" checked={groupEditMessageFilter === "all"} onChange={() => setGroupEditMessageFilter("all")} disabled={groupSaving} /> Todos</label>
+                      <label><input type="radio" name="edit-message-filter" checked={groupEditMessageFilter === "paid"} onChange={() => setGroupEditMessageFilter("paid")} disabled={groupSaving} /> Pagadores</label>
+                      <label><input type="radio" name="edit-message-filter" checked={groupEditMessageFilter === "pending"} onChange={() => setGroupEditMessageFilter("pending")} disabled={groupSaving} /> Pendentes</label>
+                    </fieldset>
+                  </div>
+                  <div className="message-preview" aria-label="Prévia da lista automática">
+                    <div className="message-preview__top"><span>Lista automática</span></div>
+                    <div className="locked-list" aria-readonly="true">
+                      <p>{interpolateMessage(groupEditMessageIntro || DEFAULT_MESSAGE_INTRO, openGroup, competence)}</p>
+                      <div className="locked-list__rows">
+                        {messagePreviewLines.length ? messagePreviewLines.map((line, index) => <span key={index}>{line}</span>) : <span className="locked-list__empty">{groupEditMessageFilter === "paid" ? "Nenhum pagador ainda." : groupEditMessageFilter === "pending" ? "Nenhuma pendência." : "A lista aparecerá após a geração das cobranças."}</span>}
+                      </div>
+                      <p>{interpolateMessage(groupEditMessageOutro || DEFAULT_MESSAGE_OUTRO, openGroup, competence)}</p>
+                      <small>/g/{openGroup.publicSlug}</small>
+                    </div>
+                  </div>
+                </div>
+
+                {groupError && <p className="form-error" role="alert">{groupError}</p>}
+                <button className="button button--primary button--full" type="button" onClick={saveGroupName} disabled={groupSaving || !groupEditName.trim() || !groupEditAmount.trim() || !groupEditMessageIntro.trim() || !groupEditMessageOutro.trim()}>{groupSaving && <Spinner />}{groupSaving ? "Salvando…" : "Salvar grupo"}</button>
+                <div className="danger-zone">{confirmDeleteGroup ? <><p>Arquivar remove o grupo das listas ativas. Grupos com cobranças em aberto não podem ser arquivados.</p><div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setConfirmDeleteGroup(false)} disabled={groupSaving}>Cancelar</button><button className="button button--danger" type="button" onClick={removeGroup} disabled={groupSaving}>{groupSaving && <Spinner />}{groupSaving ? "Arquivando…" : "Confirmar"}</button></div></> : <button className="button button--danger-soft button--full" type="button" onClick={() => setConfirmDeleteGroup(true)}><Trash2 size={17} /> Arquivar grupo</button>}</div>
+              </div>
+            </div>
+          )}
+
+          {groupsScreenKind() === "edit-participant" && participantModalPerson && (
+            <div className="screen-panel">
+              <div className="screen-panel__header">
+                <button className="icon-button icon-button--large" type="button" onClick={closeGroupsScreen} disabled={participantSaving} aria-label="Voltar para o grupo"><ArrowLeft size={21} /></button>
+                <div className="screen-panel__title"><h2>{participantModalPerson.name}</h2></div>
+              </div>
+              <div className="screen-panel__body modal-card">
+                <label htmlFor="participant-name">Nome</label>
+                <input id="participant-name" maxLength={NAME_MAX} value={participantEditForm.name} onChange={(event) => setParticipantEditForm({ ...participantEditForm, name: event.target.value })} disabled={participantSaving} />
+                <label htmlFor="participant-phone">Celular</label>
+                <input id="participant-phone" type="tel" inputMode="numeric" maxLength={15} value={participantEditForm.phone} onChange={(event) => setParticipantEditForm({ ...participantEditForm, phone: formatPhoneInput(event.target.value) })} disabled={participantSaving} />
+                <label htmlFor="participant-billing-amount">Valor cobrado neste grupo</label>
+                <div className="input-prefix"><span>R$</span><input id="participant-billing-amount" inputMode="decimal" value={participantEditForm.billingAmount} onChange={(event) => setParticipantEditForm({ ...participantEditForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={participantSaving} /></div>
+                <p className="field-hint">O checkout usará este valor. A alteração também atualiza cobranças abertas; checkouts já iniciados precisam terminar primeiro.</p>
+                <label htmlFor="participant-tag">Categoria (opcional)</label>
+                <input id="participant-tag" maxLength={60} value={participantEditForm.tag} onChange={(event) => setParticipantEditForm({ ...participantEditForm, tag: event.target.value })} placeholder="Ex.: Sub-15" disabled={participantSaving} />
+                <label className="whatsapp-consent">
+                  <input
+                    type="checkbox"
+                    checked={participantEditForm.whatsappConsent}
+                    onChange={(event) => {
+                      setParticipantEditForm({ ...participantEditForm, whatsappConsent: event.target.checked });
+                      setParticipantConsentTouched(true);
+                    }}
+                    disabled={participantSaving}
+                  />
+                  <span>
+                    <strong>Autorização para cobranças privadas no WhatsApp</strong>
+                    <small>
+                      Esta autorização vale para todos os participantes associados a este número. Desmarcar registra a revogação
+                      {billingSettings?.billingModule === "dora" ? ", mesmo enquanto a Dora não envia mensagens automáticas." : "."}
+                    </small>
+                  </span>
+                </label>
+                {participantError && <p className="form-error" role="alert">{participantError}</p>}
+                <button className="button button--primary button--full" type="button" onClick={saveParticipantEdit} disabled={participantSaving || !participantEditForm.name.trim() || !participantEditForm.phone.trim() || !participantEditForm.billingAmount.trim()}>{participantSaving && <Spinner />}{participantSaving ? "Salvando…" : "Salvar participante"}</button>
+                <div className="danger-zone"><p>Remover desvincula a pessoa somente deste grupo.</p><button className="button button--danger-soft button--full" type="button" onClick={removeParticipantFromGroup} disabled={participantSaving}><Trash2 size={17} /> Remover do grupo</button></div>
+              </div>
+            </div>
+          )}
+
+          {groupsScreenKind() === "import" && openGroup && (
+            <div className="screen-panel">
+              <div className="screen-panel__header">
+                <button className="icon-button icon-button--large" type="button" onClick={closeGroupsScreen} disabled={importSaving} aria-label="Voltar para o grupo"><ArrowLeft size={21} /></button>
+                <div className="screen-panel__title"><h2>Importar participantes</h2></div>
+              </div>
+              <div className="screen-panel__body modal-card modal-card--wide">
+                <p className="modal-copy">Cole um nome por linha. Nomes repetidos no grupo serão bloqueados. Os importados começam com a sugestão de {formatMoney(openGroup.amount)}, que pode ser editada depois em cada cadastro.</p>
+                {billingSettings?.billingModule === "cobradora" && <p className="consent-explainer">Marcar registra a autorização explícita para este número. Deixar desmarcado não revoga uma autorização já existente.</p>}
+                <label htmlFor="import-text">Lista de nomes</label>
+                <textarea id="import-text" maxLength={5000} rows={5} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={"1. Ana\n2. Bruno\n3. Camila"} disabled={importSaving} />
+                <button className="button button--secondary button--full" type="button" onClick={analyzeImportText} disabled={importSaving || !importText.trim()}>Analisar lista</button>
+                {importRows.length > 0 && <ul className="import-list">{importRows.map((row) => <li key={row.id} className="import-row"><input type="checkbox" checked={row.include} onChange={(event) => updateImportRow(row.id, { include: event.target.checked })} aria-label={`Incluir ${row.name}`} disabled={importSaving || Boolean(row.error && !row.phone)} /><span className="import-row__name">{row.name}</span>{row.include && <><input type="tel" inputMode="numeric" maxLength={15} value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: formatPhoneInput(event.target.value), error: "" })} onFocus={(event) => event.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })} placeholder="(11) 99999-9999" aria-label={`Telefone de ${row.name}`} disabled={importSaving} />{billingSettings?.billingModule === "cobradora" && <label className="import-row__consent"><input type="checkbox" checked={row.whatsappConsent} onChange={(event) => updateImportRow(row.id, { whatsappConsent: event.target.checked })} aria-label={`Registrar autorização de WhatsApp para ${row.name}`} disabled={importSaving} /><span>Registrar autorização</span></label>}</>}{row.error && <small role="alert">{row.error}</small>}</li>)}</ul>}
+                {importRows.length > 0 && <div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setImportModal(false)} disabled={importSaving}>Fechar</button><button className="button button--primary" type="button" onClick={confirmImport} disabled={importSaving || !importRows.some((row) => row.include)}>{importSaving && <Spinner />}{importSaving ? "Importando…" : "Importar selecionados"}</button></div>}
+              </div>
             </div>
           )}
         </section>
 
-        <section id="pendencias" className={`surface pending-section ${mobileTab === "pendencias" ? "" : "mobile-tab-hidden"}`} aria-labelledby="pending-title">
-          <div className="section-heading">
-            <div><p className="section-kicker">Atenção necessária</p><h2 id="pending-title">Pendências de {monthLabel(competence)}</h2></div>
-            <span className="count-pill count-pill--pink">{pendingCharges.length}</span>
-          </div>
-          {pendingCharges.length === 0 ? (
-            <div className="empty-state empty-state--success"><CheckCircle2 size={30} /><strong>Tudo certo por aqui</strong><p>Não há cobranças pendentes nesta competência.</p></div>
-          ) : (
-            <ul className="pending-list">
-              {pendingCharges.map((charge) => {
-                const group = groupOf(charge.groupId);
-                return (
-                  <li key={charge.id} className="pending-row">
-                    <span className="person-avatar">{getInitials(charge.participantName ?? "Participante")}</span>
-                    <div className="pending-row__person">
-                      <strong>{charge.participantName ?? "Participante"}</strong>
-                      <span>{group?.name ?? "Grupo"} · {charge.rawStatus === "checkout_pending" ? "checkout iniciado" : "aguardando pagamento"}</span>
-                    </div>
-                    <strong className="pending-row__amount">{formatMoney(charge.amount)}</strong>
-                    {isAdmin && charge.rawStatus === "open" ? (
-                      <span className="pending-row__actions">
-                        <button className="button button--secondary button--small" type="button" onClick={() => openSettleModal(charge.id)}>Dar baixa</button>
-                        <button className="button button--danger button--small" type="button" onClick={() => cancelCharge(charge.id)} disabled={cancelingChargeId === charge.id}>{cancelingChargeId === charge.id ? <Spinner size={15} /> : <X size={15} />} Cancelar dívida</button>
-                      </span>
-                    ) : charge.rawStatus === "checkout_pending" ? (
-                      <span className="pending-row__actions">
-                        <span className="status-pill">Em conciliação</span>
-                        {isAdmin && (
-                          <button className="button button--secondary button--small" type="button" onClick={() => releaseStuckCheckout(charge.id)} disabled={releasingChargeId === charge.id}>
-                            {releasingChargeId === charge.id && <Spinner size={15} />} Liberar cobrança
-                          </button>
-                        )}
-                      </span>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
 
         <section id="configuracoes" className={`settings-section ${mobileTab === "ajustes" ? "" : "mobile-tab-hidden"}`} aria-labelledby="settings-title">
           <div className="section-heading section-heading--outside">
@@ -1690,7 +1920,6 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       <nav className="mobile-tabbar" aria-label="Navegação principal">
         <button type="button" className={mobileTab === "home" ? "active" : ""} onClick={() => setMobileTab("home")}><Home size={20} /> Home</button>
         <button type="button" className={mobileTab === "grupos" ? "active" : ""} onClick={() => setMobileTab("grupos")}><UsersRound size={20} /> Grupos</button>
-        <button type="button" className={mobileTab === "pendencias" ? "active" : ""} onClick={() => setMobileTab("pendencias")}><WalletCards size={20} /> Pendências</button>
         <button type="button" className={mobileTab === "ajustes" ? "active" : ""} onClick={() => setMobileTab("ajustes")}><Settings2 size={20} /> Ajustes</button>
       </nav>
 
@@ -1700,59 +1929,13 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
           <nav className="footer-nav" aria-label="Atalhos da tela principal">
             <a className="footer-link" href="#top">Resumo</a>
             <a className="footer-link" href="#grupos">Grupos</a>
-            <a className="footer-link" href="#pendencias">Pendências</a>
             <a className="footer-link" href="#configuracoes"><Settings2 size={17} /> Configurações</a>
           </nav>
           <div className="footer-user"><span className="person-avatar person-avatar--user">{getInitials(user.name)}</span><div><strong>{user.name}</strong><small>{ROLE_LABELS[user.role]}</small></div><button className="button button--ghost" type="button" onClick={handleLogout} disabled={loggingOut}>{loggingOut ? <Spinner size={17} /> : <LogOut size={17} />} Sair</button></div>
         </div>
       </footer>
 
-      {openGroup && (
-        <div className="drawer-backdrop" onMouseDown={() => setOpenGroupId(null)}>
-          <aside className="group-drawer" role="dialog" aria-modal="true" aria-labelledby="group-drawer-title" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="drawer-header">
-              <div>
-                <p className="section-kicker">Detalhes do grupo</p>
-                <h2 id="group-drawer-title">{openGroup.name}</h2>
-                <span>Valor sugerido {formatMoney(openGroup.amount)} · {openGroup.dueDay ? `renovação dia ${openGroup.dueDay}` : "renovação manual"}</span>
-                {isAdmin && !openGroup.dueDay && (
-                  <button className="button button--secondary button--small drawer-header__renew" type="button" onClick={renewGroupCycle} disabled={renewingCycle}>
-                    {renewingCycle ? <Spinner size={15} /> : <RotateCw size={15} />} {renewingCycle ? "Renovando…" : "Renovar ciclo"}
-                  </button>
-                )}
-              </div>
-              <button className="icon-button icon-button--large" type="button" onClick={() => setOpenGroupId(null)} aria-label="Fechar detalhes do grupo"><X size={21} /></button>
-            </div>
-            <div className="drawer-body">
-              {lateCycleNotice && <div className="inline-alert" role="status"><AlertTriangle size={19} /><p><strong>Próximo ciclo</strong>{lateCycleNotice}</p><button type="button" onClick={() => setLateCycleNotice("")} aria-label="Dispensar aviso"><X size={16} /></button></div>}
-              <div className="drawer-metrics">
-                <div><span>Previsto</span><strong>{formatMoney(openGroupCharges.reduce((total, charge) => total + charge.amount, 0))}</strong></div>
-                <div><span>Recebido</span><strong>{formatMoney(openGroupPaid.reduce((total, charge) => total + charge.amount, 0))}</strong></div>
-                <div><span>Pendente</span><strong>{formatMoney(openGroupPending.reduce((total, charge) => total + charge.amount, 0))}</strong></div>
-              </div>
-              <div className="drawer-actions">
-                <button className="button button--secondary" type="button" onClick={() => copyText(memberLink(openGroup), `Link de ${openGroup.name} copiado.`)}><Link2 size={17} /> Copiar link</button>
-                <button className="button button--secondary" type="button" onClick={() => shareMessage(openGroup.name, buildChargeMessage(openGroup))}><Share2 size={17} /> Compartilhar</button>
-                {isAdmin && <button className="button button--secondary" type="button" onClick={() => openGroupEditModal(openGroup)}><Pencil size={17} /> Editar</button>}
-              </div>
-              <section className="drawer-participants" aria-labelledby="participants-title">
-                <div className="section-heading"><div><p className="section-kicker">Pessoas</p><h3 id="participants-title">Participantes ({openGroupParticipants.length})</h3></div>{isAdmin && <div className="inline-actions"><button className="button button--secondary button--small" type="button" onClick={() => setImportModal(true)}><ClipboardPaste size={16} /> Importar</button><button className="button button--primary button--small" type="button" onClick={() => openMemberModal(openGroup)}><Plus size={16} /> Adicionar</button></div>}</div>
-                {openGroupParticipants.length === 0 ? <div className="empty-state"><UsersRound size={27} /><strong>Nenhum participante ainda</strong><p>Adicione uma pessoa ou importe uma lista.</p></div> : <ul className="participant-list">{openGroupParticipants.map((person) => {
-                  const charge = openGroupCharges.find((item) => item.participantId === person.id);
-                  const label = !charge ? "Entra no próximo ciclo" : charge.status === "paid" ? `Pago${charge.paidAt ? ` em ${formatDate(charge.paidAt)}` : ""}` : charge.rawStatus === "checkout_pending" ? "Checkout em andamento" : "Aguardando pagamento";
-                  const individualAmount = person.billingAmounts[openGroup.id];
-                  const tag = person.tags[openGroup.id];
-                  return <li key={person.id}><button type="button" className="participant-button" onClick={() => isAdmin && openParticipantModal(openGroup.id, person)} disabled={!isAdmin}><span className={`status-dot ${charge?.status === "paid" ? "status-dot--paid" : !charge ? "status-dot--next" : ""}`} /><span className="person-avatar">{getInitials(person.name)}</span><span className="participant-button__main"><strong>{person.name}</strong><small>{person.phone} · {label}</small>{tag && <span className="tag-chip">{tag}</span>}</span><span className="participant-button__billing"><small>Valor individual</small><strong>{individualAmount ? formatMoney(individualAmount / 100) : charge ? formatMoney(charge.amount) : formatMoney(openGroup.amount)}</strong></span>{isAdmin && <Pencil className="participant-button__edit" size={16} aria-hidden="true" />}</button>{isAdmin && charge?.rawStatus === "open" ? <span className="participant-settle-actions"><button type="button" className="button button--secondary button--small participant-settle" onClick={() => openSettleModal(charge.id)}>Dar baixa</button><button type="button" className="icon-button icon-button--danger" onClick={() => cancelCharge(charge.id)} aria-label={`Cancelar cobrança de ${person.name}`}><X size={15} /></button></span> : isAdmin && charge?.rawStatus === "checkout_pending" ? <span className="participant-settle-actions"><button type="button" className="button button--secondary button--small participant-settle" onClick={() => releaseStuckCheckout(charge.id)} disabled={releasingChargeId === charge.id}>{releasingChargeId === charge.id ? <Spinner size={15} /> : null} Liberar cobrança</button></span> : null}</li>;
-                })}</ul>}
-              </section>
-            </div>
-          </aside>
-        </div>
-      )}
-
       {isAdmin && <>
-      {groupModal && <ModalShell title="Novo grupo" id="new-group-title" onClose={() => !creatingGroup && setGroupModal(false)} locked={creatingGroup}><label htmlFor="group-name">Nome do grupo</label><input id="group-name" maxLength={NAME_MAX} value={groupForm.name} onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })} placeholder="Vôlei de quinta" autoFocus disabled={creatingGroup} /><label htmlFor="group-sport">Modalidade (opcional)</label><input id="group-sport" maxLength={40} value={groupForm.sport} onChange={(event) => setGroupForm({ ...groupForm, sport: event.target.value })} placeholder="Vôlei" disabled={creatingGroup} /><div className="field-grid"><div><label htmlFor="group-amount">Sugestão de valor</label><div className="input-prefix"><span>R$</span><input id="group-amount" value={groupForm.amount} onChange={(event) => setGroupForm({ ...groupForm, amount: event.target.value.replace(/[^\d,.]/g, "") })} inputMode="decimal" placeholder="80,00" disabled={creatingGroup} /></div><p className="field-hint">Preenche novos cadastros, mas cada participante pode ter seu próprio valor.</p></div><div><label htmlFor="group-day">Renovação</label><div className="input-prefix"><span>dia</span><input id="group-day" type="number" min={1} max={28} inputMode="numeric" placeholder="manual" value={groupForm.billingDay} onChange={(event) => setGroupForm({ ...groupForm, billingDay: event.target.value })} disabled={creatingGroup} /></div><p className="field-hint">Deixe em branco para renovar manualmente.</p></div></div>{groupCreateError && <p className="form-error" role="alert">{groupCreateError}</p>}<button className="button button--primary button--full" type="button" onClick={createGroup} disabled={creatingGroup || !groupForm.name.trim()}>{creatingGroup && <Spinner />}{creatingGroup ? "Criando…" : "Criar grupo"}</button></ModalShell>}
-
       {gatewayModal && (
         <ModalShell title="Conta InfinitePay" id="gateway-title" onClose={() => !gatewaySaving && setGatewayModal(false)} locked={gatewaySaving}>
           <p className="modal-copy">Informe a InfiniteTag que receberá os pagamentos da organização.</p>
@@ -1779,81 +1962,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
         </ModalShell>
       )}
 
-      {memberModal && openGroup && <ModalShell title={`Adicionar a ${openGroup.name}`} id="member-title" onClose={() => !memberSaving && setMemberModal(false)} locked={memberSaving}><p className="modal-copy">Se o ciclo deste mês já foi renovado, a pessoa entrará apenas na próxima cobrança.</p><label htmlFor="member-name">Nome</label><input id="member-name" maxLength={NAME_MAX} value={memberForm.name} onChange={(event) => setMemberForm({ ...memberForm, name: event.target.value })} placeholder="Nome do participante" autoFocus disabled={memberSaving} /><label htmlFor="member-phone">Celular com DDD</label><input id="member-phone" type="tel" inputMode="numeric" maxLength={15} value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: formatPhoneInput(event.target.value) })} placeholder="(11) 99999-9999" disabled={memberSaving} /><label htmlFor="member-billing-amount">Valor deste participante</label><div className="input-prefix"><span>R$</span><input id="member-billing-amount" inputMode="decimal" value={memberForm.billingAmount} onChange={(event) => setMemberForm({ ...memberForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={memberSaving} /></div><p className="field-hint">A sugestão de {formatMoney(openGroup.amount)} veio do grupo. Ajuste aqui sem alterar os demais participantes.</p><label htmlFor="member-tag">Categoria (opcional)</label><input id="member-tag" maxLength={60} value={memberForm.tag} onChange={(event) => setMemberForm({ ...memberForm, tag: event.target.value })} placeholder="Ex.: Sub-15" disabled={memberSaving} />{billingSettings?.billingModule === "cobradora" && <label className="whatsapp-consent"><input type="checkbox" checked={memberForm.whatsappConsent} onChange={(event) => setMemberForm({ ...memberForm, whatsappConsent: event.target.checked })} disabled={memberSaving} /><span><strong>Registrar autorização para cobrança privada no WhatsApp</strong><small>Marque somente com autorização explícita. Desmarcado, o cadastro preserva uma autorização já existente para este número.</small></span></label>}{memberError && <p className="form-error" role="alert">{memberError}</p>}<button className="button button--primary button--full" type="button" onClick={() => addMember(openGroup.id)} disabled={memberSaving || !memberForm.name.trim() || !memberForm.phone.trim() || !memberForm.billingAmount.trim()}>{memberSaving && <Spinner />}{memberSaving ? "Adicionando…" : "Adicionar participante"}</button></ModalShell>}
-
       {settleModal && <ModalShell title="Registrar pagamento" id="settle-title" onClose={() => !settleSaving && setSettleModal(null)} locked={settleSaving}><p className="modal-copy">Use a baixa manual apenas quando o pagamento foi confirmado fora do checkout.</p><fieldset className="message-filter"><legend>Forma de pagamento</legend><label><input type="radio" name="settle-method" checked={settleMethod === "dinheiro"} onChange={() => setSettleMethod("dinheiro")} disabled={settleSaving} /> Dinheiro</label><label><input type="radio" name="settle-method" checked={settleMethod === "pix"} onChange={() => setSettleMethod("pix")} disabled={settleSaving} /> Pix</label><label><input type="radio" name="settle-method" checked={settleMethod === "outro"} onChange={() => setSettleMethod("outro")} disabled={settleSaving} /> Outro</label></fieldset><label htmlFor="settle-observation">Observação {settleMethod === "outro" ? "" : "(opcional)"}</label><textarea id="settle-observation" maxLength={300} rows={3} value={settleObservation} onChange={(event) => setSettleObservation(event.target.value)} placeholder={settleMethod === "outro" ? "Descreva a forma de pagamento" : "Ex.: pago em espécie"} disabled={settleSaving} />{settleError && <p className="form-error" role="alert">{settleError}</p>}<div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setSettleModal(null)} disabled={settleSaving}>Cancelar</button><button className="button button--primary" type="button" onClick={confirmSettle} disabled={settleSaving || (settleMethod === "outro" && !settleObservation.trim())}>{settleSaving && <Spinner />}{settleSaving ? "Salvando…" : "Confirmar baixa"}</button></div></ModalShell>}
-
-      {groupEditModal && openGroup && <ModalShell title="Editar grupo" id="edit-group-title" wide onClose={() => !groupSaving && setGroupEditModal(false)} locked={groupSaving}><label htmlFor="edit-group-name">Nome do grupo</label><input id="edit-group-name" maxLength={NAME_MAX} value={groupEditName} onChange={(event) => setGroupEditName(event.target.value)} autoFocus disabled={groupSaving} /><div className="field-grid"><div><label htmlFor="edit-group-amount">Sugestão para novos participantes</label><div className="input-prefix"><span>R$</span><input id="edit-group-amount" inputMode="decimal" value={groupEditAmount} onChange={(event) => setGroupEditAmount(event.target.value.replace(/[^\d,.]/g, ""))} placeholder="80,00" disabled={groupSaving} /></div><p className="field-hint">Esta sugestão não altera o valor dos participantes que já estão cadastrados.</p></div><div><label htmlFor="edit-group-day">Dia de renovação</label><div className="input-prefix"><span>dia</span><input id="edit-group-day" type="number" min={1} max={28} inputMode="numeric" placeholder="manual" value={groupEditDay} onChange={(event) => setGroupEditDay(event.target.value)} disabled={groupSaving} /></div><p className="field-hint">Em branco = renovação manual (sem cron automático).</p></div></div>
-
-        <div className="message-editor">
-          <div className="message-fields">
-            <label htmlFor="edit-message-intro">Introdução <span>{groupEditMessageIntro.length}/{MESSAGE_MAX}</span></label>
-            <textarea id="edit-message-intro" rows={4} maxLength={MESSAGE_MAX} value={groupEditMessageIntro} onChange={(event) => setGroupEditMessageIntro(event.target.value)} disabled={groupSaving} />
-            <label htmlFor="edit-message-outro">Encerramento <span>{groupEditMessageOutro.length}/{MESSAGE_MAX}</span></label>
-            <textarea id="edit-message-outro" rows={4} maxLength={MESSAGE_MAX} value={groupEditMessageOutro} onChange={(event) => setGroupEditMessageOutro(event.target.value)} disabled={groupSaving} />
-            <fieldset className="message-filter">
-              <legend>Listar na mensagem</legend>
-              <label><input type="radio" name="edit-message-filter" checked={groupEditMessageFilter === "all"} onChange={() => setGroupEditMessageFilter("all")} disabled={groupSaving} /> Todos</label>
-              <label><input type="radio" name="edit-message-filter" checked={groupEditMessageFilter === "paid"} onChange={() => setGroupEditMessageFilter("paid")} disabled={groupSaving} /> Pagadores</label>
-              <label><input type="radio" name="edit-message-filter" checked={groupEditMessageFilter === "pending"} onChange={() => setGroupEditMessageFilter("pending")} disabled={groupSaving} /> Pendentes</label>
-            </fieldset>
-          </div>
-          <div className="message-preview" aria-label="Prévia da lista automática">
-            <div className="message-preview__top"><span>Lista automática</span></div>
-            <div className="locked-list" aria-readonly="true">
-              <p>{interpolateMessage(groupEditMessageIntro || DEFAULT_MESSAGE_INTRO, openGroup, competence)}</p>
-              <div className="locked-list__rows">
-                {messagePreviewLines.length ? messagePreviewLines.map((line, index) => <span key={index}>{line}</span>) : <span className="locked-list__empty">{groupEditMessageFilter === "paid" ? "Nenhum pagador ainda." : groupEditMessageFilter === "pending" ? "Nenhuma pendência." : "A lista aparecerá após a geração das cobranças."}</span>}
-              </div>
-              <p>{interpolateMessage(groupEditMessageOutro || DEFAULT_MESSAGE_OUTRO, openGroup, competence)}</p>
-              <small>/g/{openGroup.publicSlug}</small>
-            </div>
-          </div>
-        </div>
-
-        {groupError && <p className="form-error" role="alert">{groupError}</p>}<button className="button button--primary button--full" type="button" onClick={saveGroupName} disabled={groupSaving || !groupEditName.trim() || !groupEditAmount.trim() || !groupEditMessageIntro.trim() || !groupEditMessageOutro.trim()}>{groupSaving && <Spinner />}{groupSaving ? "Salvando…" : "Salvar grupo"}</button><div className="danger-zone">{confirmDeleteGroup ? <><p>Arquivar remove o grupo das listas ativas. Grupos com cobranças em aberto não podem ser arquivados.</p><div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setConfirmDeleteGroup(false)} disabled={groupSaving}>Cancelar</button><button className="button button--danger" type="button" onClick={removeGroup} disabled={groupSaving}>{groupSaving && <Spinner />}{groupSaving ? "Arquivando…" : "Confirmar"}</button></div></> : <button className="button button--danger-soft button--full" type="button" onClick={() => setConfirmDeleteGroup(true)}><Trash2 size={17} /> Arquivar grupo</button>}</div></ModalShell>}
-
-      {participantModal && participantModalPerson && (
-        <ModalShell
-          title={participantModalPerson.name}
-          id="participant-title"
-          onClose={() => !participantSaving && setParticipantModal(null)}
-          locked={participantSaving}
-        >
-          <label htmlFor="participant-name">Nome</label>
-          <input id="participant-name" maxLength={NAME_MAX} value={participantEditForm.name} onChange={(event) => setParticipantEditForm({ ...participantEditForm, name: event.target.value })} disabled={participantSaving} />
-          <label htmlFor="participant-phone">Celular</label>
-          <input id="participant-phone" type="tel" inputMode="numeric" maxLength={15} value={participantEditForm.phone} onChange={(event) => setParticipantEditForm({ ...participantEditForm, phone: formatPhoneInput(event.target.value) })} disabled={participantSaving} />
-          <label htmlFor="participant-billing-amount">Valor cobrado neste grupo</label>
-          <div className="input-prefix"><span>R$</span><input id="participant-billing-amount" inputMode="decimal" value={participantEditForm.billingAmount} onChange={(event) => setParticipantEditForm({ ...participantEditForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={participantSaving} /></div>
-          <p className="field-hint">O checkout usará este valor. A alteração também atualiza cobranças abertas; checkouts já iniciados precisam terminar primeiro.</p>
-          <label htmlFor="participant-tag">Categoria (opcional)</label>
-          <input id="participant-tag" maxLength={60} value={participantEditForm.tag} onChange={(event) => setParticipantEditForm({ ...participantEditForm, tag: event.target.value })} placeholder="Ex.: Sub-15" disabled={participantSaving} />
-          <label className="whatsapp-consent">
-            <input
-              type="checkbox"
-              checked={participantEditForm.whatsappConsent}
-              onChange={(event) => {
-                setParticipantEditForm({ ...participantEditForm, whatsappConsent: event.target.checked });
-                setParticipantConsentTouched(true);
-              }}
-              disabled={participantSaving}
-            />
-            <span>
-              <strong>Autorização para cobranças privadas no WhatsApp</strong>
-              <small>
-                Esta autorização vale para todos os participantes associados a este número. Desmarcar registra a revogação
-                {billingSettings?.billingModule === "dora" ? ", mesmo enquanto a Dora não envia mensagens automáticas." : "."}
-              </small>
-            </span>
-          </label>
-          {participantError && <p className="form-error" role="alert">{participantError}</p>}
-          <button className="button button--primary button--full" type="button" onClick={saveParticipantEdit} disabled={participantSaving || !participantEditForm.name.trim() || !participantEditForm.phone.trim() || !participantEditForm.billingAmount.trim()}>{participantSaving && <Spinner />}{participantSaving ? "Salvando…" : "Salvar participante"}</button>
-          <div className="danger-zone"><p>Remover desvincula a pessoa somente deste grupo.</p><button className="button button--danger-soft button--full" type="button" onClick={removeParticipantFromGroup} disabled={participantSaving}><Trash2 size={17} /> Remover do grupo</button></div>
-        </ModalShell>
-      )}
-
-      {importModal && openGroup && <ModalShell title="Importar participantes" id="import-title" wide onClose={() => !importSaving && setImportModal(false)} locked={importSaving}><p className="modal-copy">Cole um nome por linha. Nomes repetidos no grupo serão bloqueados. Os importados começam com a sugestão de {formatMoney(openGroup.amount)}, que pode ser editada depois em cada cadastro.</p>{billingSettings?.billingModule === "cobradora" && <p className="consent-explainer">Marcar registra a autorização explícita para este número. Deixar desmarcado não revoga uma autorização já existente.</p>}<label htmlFor="import-text">Lista de nomes</label><textarea id="import-text" maxLength={5000} rows={5} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={"1. Ana\n2. Bruno\n3. Camila"} disabled={importSaving} /><button className="button button--secondary button--full" type="button" onClick={analyzeImportText} disabled={importSaving || !importText.trim()}>Analisar lista</button>{importRows.length > 0 && <ul className="import-list">{importRows.map((row) => <li key={row.id} className="import-row"><input type="checkbox" checked={row.include} onChange={(event) => updateImportRow(row.id, { include: event.target.checked })} aria-label={`Incluir ${row.name}`} disabled={importSaving || Boolean(row.error && !row.phone)} /><span className="import-row__name">{row.name}</span>{row.include && <><input type="tel" inputMode="numeric" maxLength={15} value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: formatPhoneInput(event.target.value), error: "" })} onFocus={(event) => event.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })} placeholder="(11) 99999-9999" aria-label={`Telefone de ${row.name}`} disabled={importSaving} />{billingSettings?.billingModule === "cobradora" && <label className="import-row__consent"><input type="checkbox" checked={row.whatsappConsent} onChange={(event) => updateImportRow(row.id, { whatsappConsent: event.target.checked })} aria-label={`Registrar autorização de WhatsApp para ${row.name}`} disabled={importSaving} /><span>Registrar autorização</span></label>}</>}{row.error && <small role="alert">{row.error}</small>}</li>)}</ul>}{importRows.length > 0 && <div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setImportModal(false)} disabled={importSaving}>Fechar</button><button className="button button--primary" type="button" onClick={confirmImport} disabled={importSaving || !importRows.some((row) => row.include)}>{importSaving && <Spinner />}{importSaving ? "Importando…" : "Importar selecionados"}</button></div>}</ModalShell>}
       </>}
     </div>
   );
