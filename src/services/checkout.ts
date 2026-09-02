@@ -15,7 +15,7 @@ import { and, desc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import { getPaymentsAdapter } from "@/payments";
 import { InfinitePayCheckoutRequestError } from "@/payments/infinitepay-adapter";
 import { deriveCheckoutToken, hashCheckoutToken } from "@/payments/session-tokens";
-import { normalizePhoneBR } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
 
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const CREATION_IN_FLIGHT_MS = 20_000;
@@ -44,8 +44,7 @@ export class PublicCheckoutError extends Error {
 
 function normalizeAndValidatePhone(rawPhone: string): string {
   try {
-    const normalized = normalizePhoneBR(rawPhone);
-    if (/^\+55[1-9][0-9]9[0-9]{8}$/.test(normalized)) return normalized;
+    return normalizePhone(rawPhone);
   } catch {
     // A resposta pública abaixo é deliberadamente uniforme.
   }

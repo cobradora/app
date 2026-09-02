@@ -12,7 +12,7 @@ import {
 } from "@/db/schema";
 import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { parsePhoneBR, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
+import { parsePhone, isValidPhone, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 import {
   cleanHumanName,
   normalizeHumanName,
@@ -41,15 +41,6 @@ function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { code?: string }).code === "23505";
 }
 
-const validPhone = (value: string) => {
-  try {
-    parsePhoneBR(value);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const participantFields = z.object({
   name: z
     .string()
@@ -59,7 +50,7 @@ const participantFields = z.object({
   phone: z
     .string()
     .max(PHONE_INPUT_MAX_LENGTH)
-    .refine(validPhone, "Informe um celular brasileiro válido com DDD"),
+    .refine(isValidPhone, "Informe um telefone válido com código do país"),
   // Opt-in explícito do responsável financeiro para templates iniciados pela
   // plataforma. Ausente preserva o consentimento atual do telefone.
   whatsappConsent: z.boolean().optional(),
@@ -116,7 +107,7 @@ async function upsertFinancialContact(
   rawPhone: string,
   whatsappConsent?: boolean,
 ) {
-  const phone = parsePhoneBR(rawPhone);
+  const phone = parsePhone(rawPhone);
   const consentChangedAt = new Date();
   const consentInsertValues =
     whatsappConsent === true
@@ -306,7 +297,7 @@ export async function findOrCreateParticipantByPhone(
   rawPhone: string,
   name?: string,
 ) {
-  const phone = parsePhoneBR(rawPhone);
+  const phone = parsePhone(rawPhone);
   const parsed = participantFields.parse({ name: name ?? `Participante ${phone.normalized.slice(-4)}`, phone: rawPhone });
   const nameNormalized = normalizeHumanName(parsed.name);
 
@@ -618,7 +609,7 @@ export async function updateParticipant(
   rawInput: UpdateParticipantInput,
 ) {
   const input = updateParticipantInput.parse(rawInput);
-  const phone = parsePhoneBR(input.phone);
+  const phone = parsePhone(input.phone);
   const nameNormalized = normalizeHumanName(input.name);
 
   try {

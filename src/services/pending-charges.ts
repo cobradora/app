@@ -1,7 +1,7 @@
 import { db } from "@/db";
 import { charges, billingPeriods, groups, participants, financialContacts } from "@/db/schema";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { normalizePhoneBR } from "@/lib/phone";
+import { normalizePhone } from "@/lib/phone";
 
 /**
  * A resposta vazia é deliberadamente uniforme para grupo/telefone ausente ou
@@ -16,7 +16,7 @@ export async function listPendingChargesByPhone(groupPublicSlug: string, rawPhon
 
   let phoneNormalized: string;
   try {
-    phoneNormalized = normalizePhoneBR(rawPhone);
+    phoneNormalized = normalizePhone(rawPhone);
   } catch {
     return [];
   }

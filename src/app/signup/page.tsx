@@ -8,18 +8,7 @@ import { ArrowRight, CreditCard, Eye, EyeOff, Sparkles } from "lucide-react";
 import { apiClient, type BillingModule } from "@/lib/api-client";
 import { Spinner } from "@/components/spinner";
 import cobraLogo from "@/images/logo-cobra-sem-fundo.png";
-
-function formatPhoneInput(raw: string): string {
-  const digits = raw.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "").slice(0, 11);
-  if (digits.length <= 2) return digits;
-  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
-  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
-  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
-}
-
-function isValidBrPhone(value: string): boolean {
-  return /^[1-9]\d9\d{8}$/.test(value.replace(/\D/g, ""));
-}
+import { formatPhoneInput, isValidPhone, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 
 // Temporário: módulo Premium/CobraDora ainda em estabilização (automação via
 // WhatsApp). Reverter pra `false` quando estiver pronto pra reabrir seleção.
@@ -48,8 +37,8 @@ function SignupForm() {
       setError("A confirmação não bate com a senha.");
       return;
     }
-    if (billingModule === "cobradora" && !isValidBrPhone(organizerPhone)) {
-      setError("Informe um celular brasileiro válido com DDD para receber as atualizações.");
+    if (billingModule === "cobradora" && !isValidPhone(organizerPhone)) {
+      setError("Informe um telefone válido. Para outros países, use o código do país, como +351.");
       return;
     }
     setSubmitting(true);
@@ -78,7 +67,7 @@ function SignupForm() {
       password.trim().length >= 8 &&
       confirmPassword.trim().length >= 8 &&
       acceptedTerms &&
-      (billingModule === "dora" || isValidBrPhone(organizerPhone)),
+      (billingModule === "dora" || isValidPhone(organizerPhone)),
   );
 
   return (
@@ -135,17 +124,17 @@ function SignupForm() {
                 <input
                   id="organizerPhone"
                   type="tel"
-                  inputMode="numeric"
+                  inputMode="tel"
                   autoComplete="tel"
-                  maxLength={15}
+                  maxLength={PHONE_INPUT_MAX_LENGTH}
                   value={organizerPhone}
                   onChange={(event) => setOrganizerPhone(formatPhoneInput(event.target.value))}
-                  placeholder="(11) 99999-9999"
+                  placeholder="(11) 99999-9999 ou +351…"
                   required
                   aria-describedby="organizer-phone-hint"
                 />
               </div>
-              <p id="organizer-phone-hint" className="field-hint">É neste número que a CobraDora enviará as listas atualizadas.</p>
+              <p id="organizer-phone-hint" className="field-hint">Para outros países, comece com + e o código do país. É neste número que a CobraDora enviará as listas.</p>
             </div>
           )}
 

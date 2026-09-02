@@ -83,8 +83,8 @@ export const organizations = pgTable("organizations", {
   name: varchar("name", { length: 200 }).notNull(),
   status: orgStatusEnum("status").notNull().default("active"),
   billingModule: billingModuleEnum("billing_module").notNull().default("dora"),
-  organizerPhoneNormalized: varchar("organizer_phone_normalized", { length: 14 }),
-  organizerPhoneDisplay: varchar("organizer_phone_display", { length: 20 }),
+  organizerPhoneNormalized: varchar("organizer_phone_normalized", { length: 16 }),
+  organizerPhoneDisplay: varchar("organizer_phone_display", { length: 25 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => ({
@@ -94,7 +94,7 @@ export const organizations = pgTable("organizations", {
   ),
   organizerPhoneFormatCheck: check(
     "organizations_organizer_phone_format_check",
-    sql`${table.organizerPhoneNormalized} is null or ${table.organizerPhoneNormalized} ~ '^\\+55[1-9][0-9]9[0-9]{8}$'`,
+    sql`${table.organizerPhoneNormalized} is null or ${table.organizerPhoneNormalized} ~ '^\\+[1-9][0-9]{7,14}$'`,
   ),
   cobradoraPhoneRequiredCheck: check(
     "organizations_cobradora_phone_required_check",
@@ -154,8 +154,8 @@ export const groups = pgTable("groups", {
 export const financialContacts = pgTable("financial_contacts", {
   id: uuid("id").defaultRandom().primaryKey(),
   organizationId: uuid("organization_id").notNull().references(() => organizations.id),
-  phoneNormalized: varchar("phone_normalized", { length: 14 }).notNull(),
-  phoneDisplay: varchar("phone_display", { length: 20 }).notNull(),
+  phoneNormalized: varchar("phone_normalized", { length: 16 }).notNull(),
+  phoneDisplay: varchar("phone_display", { length: 25 }).notNull(),
   whatsappOptInAt: timestamp("whatsapp_opt_in_at", { withTimezone: true }),
   whatsappOptOutAt: timestamp("whatsapp_opt_out_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -165,7 +165,7 @@ export const financialContacts = pgTable("financial_contacts", {
     .on(table.organizationId, table.phoneNormalized),
   organizationIdentityUnique: uniqueIndex("financial_contacts_organization_id_id_unique")
     .on(table.organizationId, table.id),
-  phoneCheck: check("financial_contacts_phone_check", sql`${table.phoneNormalized} ~ '^\\+55[1-9][0-9]9[0-9]{8}$'`),
+  phoneCheck: check("financial_contacts_phone_check", sql`${table.phoneNormalized} ~ '^\\+[1-9][0-9]{7,14}$'`),
 }));
 
 // ---------- participants ----------
@@ -381,7 +381,7 @@ export const whatsappNotifications = pgTable("whatsapp_notifications", {
   financialContactId: uuid("financial_contact_id"),
   kind: whatsappNotificationKindEnum("kind").notNull(),
   status: whatsappDeliveryStatusEnum("status").notNull().default("queued"),
-  recipientPhoneNormalized: varchar("recipient_phone_normalized", { length: 14 }).notNull(),
+  recipientPhoneNormalized: varchar("recipient_phone_normalized", { length: 16 }).notNull(),
   idempotencyKey: varchar("idempotency_key", { length: 200 }).notNull(),
   payload: jsonb("payload").notNull(),
   metaMessageId: varchar("meta_message_id", { length: 200 }),
@@ -409,7 +409,7 @@ export const whatsappNotifications = pgTable("whatsapp_notifications", {
   }),
   recipientPhoneCheck: check(
     "whatsapp_notifications_recipient_phone_check",
-    sql`${table.recipientPhoneNormalized} ~ '^\\+55[1-9][0-9]9[0-9]{8}$'`,
+    sql`${table.recipientPhoneNormalized} ~ '^\\+[1-9][0-9]{7,14}$'`,
   ),
   attemptCountCheck: check("whatsapp_notifications_attempt_count_check", sql`${table.attemptCount} >= 0`),
   kindContactCheck: check(

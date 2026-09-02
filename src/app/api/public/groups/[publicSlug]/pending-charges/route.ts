@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { listPendingChargesByPhone } from "@/services/pending-charges";
 import { assertTrustedOrigin } from "@/lib/origin-guard";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { isValidPhone, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 import { z } from "zod";
 
 const MAX_BODY_BYTES = 512;
 // Mais restritivo que as outras rotas públicas: recebe telefone e devolve
 // se há cobrança pendente — sem limite, dá pra enumerar números cadastrados.
 const RATE_LIMIT_PER_MINUTE = 10;
-const lookupInput = z.object({ phone: z.string().min(10).max(20) }).strict();
+const lookupInput = z.object({ phone: z.string().max(PHONE_INPUT_MAX_LENGTH).refine(isValidPhone) }).strict();
 
 function noStoreJson(body: unknown, status = 200) {
   return NextResponse.json(body, {

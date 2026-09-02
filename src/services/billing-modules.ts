@@ -2,21 +2,12 @@ import { db } from "@/db";
 import { auditEvents, organizations } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { parsePhoneBR, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
-
-function isValidPhone(value: string): boolean {
-  try {
-    parsePhoneBR(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { parsePhone, isValidPhone, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 
 const organizerPhoneInput = z
   .string()
   .max(PHONE_INPUT_MAX_LENGTH)
-  .refine(isValidPhone, "Informe um celular brasileiro válido com DDD");
+  .refine(isValidPhone, "Informe um telefone válido com código do país");
 
 export const billingModuleSettingsInput = z
   .object({
@@ -66,7 +57,7 @@ export async function updateBillingModuleSettings(
         organizerPhoneNormalized = null;
         organizerPhoneDisplay = null;
       } else {
-        const parsed = parsePhoneBR(input.organizerPhone);
+        const parsed = parsePhone(input.organizerPhone);
         organizerPhoneNormalized = parsed.normalized;
         organizerPhoneDisplay = parsed.display;
       }

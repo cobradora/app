@@ -12,7 +12,7 @@ export type CreateCheckoutInput = {
   webhookToken?: string; // segredo em claro (base64url) gerado pelo service; o adapter nao o persiste, so o embute na webhook_url
   recoveryToken?: string; // segredo em claro usado apenas na redirect_url para recuperar/confirmar o checkout no retorno
   buyerName?: string; // nome do participante, para pre-preencher customer.name na InfinitePay
-  buyerPhone?: string; // participants.phoneNormalized (+55DDDNNNNNNNNN), para pre-preencher customer.phone_number
+  buyerPhone?: string; // Telefone E.164 do contato, para pre-preencher customer.phone_number
   description?: string; // descricao do item exibida no checkout; sem isso, o adapter usa um texto fixo
 };
 

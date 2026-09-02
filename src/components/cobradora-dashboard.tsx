@@ -46,6 +46,7 @@ import {
   type ParticipantContactDetails,
 } from "@/lib/api-client";
 import { formatDate, formatMoney, type Group, type Participant } from "@/lib/mock-data";
+import { formatPhoneInput, isValidPhone, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 
 type DashboardUser = { name: string; role: "owner" | "admin" | "member" };
 type ImportRow = { id: string; name: string; include: boolean; phone: string; whatsappConsent: boolean; error: string };
@@ -210,18 +211,6 @@ function parseAmountInput(value: string): number {
     : value;
   const amount = Number(normalized);
   return Number.isFinite(amount) ? Math.round(amount * 100) : 0;
-}
-
-function formatPhoneInput(raw: string): string {
-  const digits = raw.replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "").slice(0, 11);
-  if (digits.length <= 2) return digits;
-  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
-  if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
-  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
-}
-
-function isValidBrPhone(value: string): boolean {
-  return /^[1-9]\d9\d{8}$/.test(value.replace(/\D/g, ""));
 }
 
 function normalizePersonName(value: string): string {
@@ -645,8 +634,8 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   }
 
   async function saveBillingSettings() {
-    if (billingModuleDraft === "cobradora" && !isValidBrPhone(organizerPhoneInput)) {
-      setBillingSettingsError("Informe um celular brasileiro válido com DDD para receber as atualizações.");
+    if (billingModuleDraft === "cobradora" && !isValidPhone(organizerPhoneInput)) {
+      setBillingSettingsError("Informe um telefone válido. Para outros países, use o código do país, como +351.");
       return;
     }
     setBillingSettingsSaving(true);
@@ -967,8 +956,8 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       setParticipantError("Já existe um participante com esse nome neste grupo.");
       return;
     }
-    if (!isValidBrPhone(phone)) {
-      setParticipantError("Informe um telefone brasileiro com DDD.");
+    if (!isValidPhone(phone)) {
+      setParticipantError("Informe um telefone válido. Para outros países, use o código do país.");
       return;
     }
     if (billingAmount <= 0 || billingAmount > 100_000_000) {
@@ -1153,8 +1142,8 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
       setMemberError("Já existe um participante com esse nome neste grupo.");
       return;
     }
-    if (!isValidBrPhone(phone)) {
-      setMemberError("Informe um telefone brasileiro com DDD.");
+    if (!isValidPhone(phone)) {
+      setMemberError("Informe um telefone válido. Para outros países, use o código do país.");
       return;
     }
     if (billingAmount <= 0 || billingAmount > 100_000_000) {
@@ -1252,7 +1241,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
     const nextCycles: string[] = [];
 
     for (const row of eligible) {
-      if (!isValidBrPhone(row.phone)) {
+      if (!isValidPhone(row.phone)) {
         failed.push({ ...row, error: "Telefone inválido — informe DDD e número" });
         continue;
       }
@@ -1654,8 +1643,9 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                 <p className="modal-copy">Se o ciclo deste mês já foi renovado, a pessoa entrará apenas na próxima cobrança.</p>
                 <label htmlFor="member-name">Nome</label>
                 <input id="member-name" maxLength={NAME_MAX} value={memberForm.name} onChange={(event) => setMemberForm({ ...memberForm, name: event.target.value })} placeholder="Nome do participante" autoFocus disabled={memberSaving} />
-                <label htmlFor="member-phone">Celular com DDD</label>
-                <input id="member-phone" type="tel" inputMode="numeric" maxLength={15} value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: formatPhoneInput(event.target.value) })} placeholder="(11) 99999-9999" disabled={memberSaving} />
+                <label htmlFor="member-phone">Celular</label>
+                <input id="member-phone" type="tel" inputMode="tel" maxLength={PHONE_INPUT_MAX_LENGTH} value={memberForm.phone} onChange={(event) => setMemberForm({ ...memberForm, phone: formatPhoneInput(event.target.value) })} placeholder="(11) 99999-9999 ou +351…" disabled={memberSaving} />
+                <p className="field-hint">Para números de outros países, comece com + e o código do país.</p>
                 <label htmlFor="member-billing-amount">Valor deste participante</label>
                 <div className="input-prefix"><span>R$</span><input id="member-billing-amount" inputMode="decimal" value={memberForm.billingAmount} onChange={(event) => setMemberForm({ ...memberForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={memberSaving} /></div>
                 <p className="field-hint">A sugestão de {formatMoney(openGroup.amount)} veio do grupo. Ajuste aqui sem alterar os demais participantes.</p>
@@ -1725,7 +1715,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                 <label htmlFor="participant-name">Nome</label>
                 <input id="participant-name" maxLength={NAME_MAX} value={participantEditForm.name} onChange={(event) => setParticipantEditForm({ ...participantEditForm, name: event.target.value })} disabled={participantSaving} />
                 <label htmlFor="participant-phone">Celular</label>
-                <input id="participant-phone" type="tel" inputMode="numeric" maxLength={15} value={participantEditForm.phone} onChange={(event) => setParticipantEditForm({ ...participantEditForm, phone: formatPhoneInput(event.target.value) })} disabled={participantSaving} />
+                <input id="participant-phone" type="tel" inputMode="tel" maxLength={PHONE_INPUT_MAX_LENGTH} value={participantEditForm.phone} onChange={(event) => setParticipantEditForm({ ...participantEditForm, phone: formatPhoneInput(event.target.value) })} placeholder="(11) 99999-9999 ou +351…" disabled={participantSaving} />
                 <label htmlFor="participant-billing-amount">Valor cobrado neste grupo</label>
                 <div className="input-prefix"><span>R$</span><input id="participant-billing-amount" inputMode="decimal" value={participantEditForm.billingAmount} onChange={(event) => setParticipantEditForm({ ...participantEditForm, billingAmount: event.target.value.replace(/[^\d,.]/g, "") })} placeholder="80,00" disabled={participantSaving} /></div>
                 <p className="field-hint">O checkout usará este valor. A alteração também atualiza cobranças abertas; checkouts já iniciados precisam terminar primeiro.</p>
@@ -1768,7 +1758,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                 <label htmlFor="import-text">Lista de nomes</label>
                 <textarea id="import-text" maxLength={5000} rows={5} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={"1. Ana\n2. Bruno\n3. Camila"} disabled={importSaving} />
                 <button className="button button--secondary button--full" type="button" onClick={analyzeImportText} disabled={importSaving || !importText.trim()}>Analisar lista</button>
-                {importRows.length > 0 && <ul className="import-list">{importRows.map((row) => <li key={row.id} className="import-row"><input type="checkbox" checked={row.include} onChange={(event) => updateImportRow(row.id, { include: event.target.checked })} aria-label={`Incluir ${row.name}`} disabled={importSaving || Boolean(row.error && !row.phone)} /><span className="import-row__name">{row.name}</span>{row.include && <><input type="tel" inputMode="numeric" maxLength={15} value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: formatPhoneInput(event.target.value), error: "" })} onFocus={(event) => event.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })} placeholder="(11) 99999-9999" aria-label={`Telefone de ${row.name}`} disabled={importSaving} />{billingSettings?.billingModule === "cobradora" && <label className="import-row__consent"><input type="checkbox" checked={row.whatsappConsent} onChange={(event) => updateImportRow(row.id, { whatsappConsent: event.target.checked })} aria-label={`Registrar autorização de WhatsApp para ${row.name}`} disabled={importSaving} /><span>Registrar autorização</span></label>}</>}{row.error && <small role="alert">{row.error}</small>}</li>)}</ul>}
+                {importRows.length > 0 && <ul className="import-list">{importRows.map((row) => <li key={row.id} className="import-row"><input type="checkbox" checked={row.include} onChange={(event) => updateImportRow(row.id, { include: event.target.checked })} aria-label={`Incluir ${row.name}`} disabled={importSaving || Boolean(row.error && !row.phone)} /><span className="import-row__name">{row.name}</span>{row.include && <><input type="tel" inputMode="tel" maxLength={PHONE_INPUT_MAX_LENGTH} value={row.phone} onChange={(event) => updateImportRow(row.id, { phone: formatPhoneInput(event.target.value), error: "" })} onFocus={(event) => event.currentTarget.scrollIntoView({ block: "center", behavior: "smooth" })} placeholder="(11) 99999-9999 ou +351…" aria-label={`Telefone de ${row.name}`} disabled={importSaving} />{billingSettings?.billingModule === "cobradora" && <label className="import-row__consent"><input type="checkbox" checked={row.whatsappConsent} onChange={(event) => updateImportRow(row.id, { whatsappConsent: event.target.checked })} aria-label={`Registrar autorização de WhatsApp para ${row.name}`} disabled={importSaving} /><span>Registrar autorização</span></label>}</>}{row.error && <small role="alert">{row.error}</small>}</li>)}</ul>}
                 {importRows.length > 0 && <div className="modal-actions"><button className="button button--secondary" type="button" onClick={() => setImportModal(false)} disabled={importSaving}>Fechar</button><button className="button button--primary" type="button" onClick={confirmImport} disabled={importSaving || !importRows.some((row) => row.include)}>{importSaving && <Spinner />}{importSaving ? "Importando…" : "Importar selecionados"}</button></div>}
               </div>
             </div>
@@ -1836,25 +1826,25 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                       <input
                         id="organizer-whatsapp"
                         type="tel"
-                        inputMode="numeric"
+                        inputMode="tel"
                         autoComplete="tel"
-                        maxLength={15}
+                        maxLength={PHONE_INPUT_MAX_LENGTH}
                         value={organizerPhoneInput}
                         onChange={(event) => setOrganizerPhoneInput(formatPhoneInput(event.target.value))}
-                        placeholder="(11) 99999-9999"
+                        placeholder="(11) 99999-9999 ou +351…"
                         disabled={!isAdmin || billingSettingsSaving}
                         aria-describedby="organizer-whatsapp-hint"
                       />
-                      <p id="organizer-whatsapp-hint">As listas atualizadas serão enviadas para este número.</p>
+                      <p id="organizer-whatsapp-hint">Para outros países, use + e o código do país. As listas serão enviadas para este número.</p>
                     </div>
                   )}
 
-                  <div className={`automation-state ${billingModuleDraft === "cobradora" && infinitePayConfigured && isValidBrPhone(organizerPhoneInput) ? "automation-state--ready" : ""}`}>
+                  <div className={`automation-state ${billingModuleDraft === "cobradora" && infinitePayConfigured && isValidPhone(organizerPhoneInput) ? "automation-state--ready" : ""}`}>
                     {billingModuleDraft === "dora"
                       ? "Na Dora, as ações Copiar link e Compartilhar continuam disponíveis em cada grupo."
                       : !infinitePayConfigured
                         ? "Cadastre a InfiniteTag para completar os dados da CobraDora."
-                        : isValidBrPhone(organizerPhoneInput)
+                        : isValidPhone(organizerPhoneInput)
                           ? "Dados cadastrados. A InfiniteTag e os templates não são verificados automaticamente; faça um checkout e um envio de teste antes do uso real."
                           : "Informe o WhatsApp do organizador para completar os dados de atualização."}
                   </div>
@@ -1870,7 +1860,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                   {billingSettingsError && <p className="form-error" role="alert">{billingSettingsError}</p>}
                   {isAdmin && (
                     <div className="setting-actions">
-                      <button className="button button--primary" type="button" onClick={saveBillingSettings} disabled={billingSettingsSaving || !billingSettingsDirty || (billingModuleDraft === "cobradora" && !isValidBrPhone(organizerPhoneInput))}>
+                      <button className="button button--primary" type="button" onClick={saveBillingSettings} disabled={billingSettingsSaving || !billingSettingsDirty || (billingModuleDraft === "cobradora" && !isValidPhone(organizerPhoneInput))}>
                         {billingSettingsSaving ? <Spinner size={17} /> : <Save size={17} />} {billingSettingsSaving ? "Salvando…" : "Salvar módulo"}
                       </button>
                     </div>

@@ -55,6 +55,17 @@ describe("participants service", () => {
     expect(second.financialRole).toBe("dependent");
   });
 
+  it("cadastra telefone de outro país no formato internacional", async () => {
+    const participant = await findOrCreateParticipantByPhone(
+      organizationId,
+      "+351 912 345 678",
+      "Participante português",
+    );
+
+    expect(participant.phoneNormalized).toBe("+351912345678");
+    expect(participant.phoneDisplay).toBe("+351912345678");
+  });
+
   it("preserva o histórico de oposição ao registrar um novo opt-in no mesmo contato", async () => {
     const participant = await addParticipantToGroup(
       organizationId,
@@ -289,7 +300,7 @@ describe("participants service", () => {
     expect(promoted.financialRole).toBe("responsible");
   });
 
-  it("rejeita telefone que nao seja celular brasileiro com DDD", async () => {
+  it("rejeita telefone inválido sem DDD ou código do país", async () => {
     await expect(
       addParticipantToGroup(organizationId, groupId, { name: "Inválido", phone: "11 1234-5678" }),
     ).rejects.toThrow();

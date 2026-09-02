@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createCheckoutForCharges, PublicCheckoutError } from "@/services/checkout";
 import { assertTrustedOrigin } from "@/lib/origin-guard";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { isValidPhone, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 import { z } from "zod";
 
 const MAX_BODY_BYTES = 8 * 1024;
 const RATE_LIMIT_PER_MINUTE = 10;
 const checkoutInput = z
   .object({
-    phone: z.string().min(10).max(20),
+    phone: z.string().max(PHONE_INPUT_MAX_LENGTH).refine(isValidPhone),
     chargeIds: z
       .array(z.string().uuid())
       .min(1)

@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useEffect, useState, type FormEvent } from "react";
 import { useParams } from "next/navigation";
 import { apiClient, ApiError } from "@/lib/api-client";
-import { parsePhoneBR, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
+import { formatPhoneInput, isValidPhone, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 import { Spinner } from "@/components/spinner";
 import cobradoraLogo from "@/images/logo-horizontal-sem-fundo.png";
 
@@ -39,24 +39,6 @@ function formatReferenceMonth(referenceMonth: string): string {
   const [year, month] = referenceMonth.split("-");
   const monthName = MONTH_NAMES[Number(month) - 1];
   return monthName ? `${monthName}/${year}` : referenceMonth;
-}
-
-function formatPhoneInput(raw: string): string {
-  const digits = raw.replace(/\D/g, "");
-  const local = digits.startsWith("55") && digits.length === 13 ? digits.slice(2) : digits;
-  const limited = local.slice(0, 11);
-  if (limited.length <= 2) return limited;
-  if (limited.length <= 7) return `(${limited.slice(0, 2)}) ${limited.slice(2)}`;
-  return `(${limited.slice(0, 2)}) ${limited.slice(2, 7)}-${limited.slice(7)}`;
-}
-
-function isValidPhone(value: string): boolean {
-  try {
-    parsePhoneBR(value);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function lookupPendingCharges(publicSlug: string, phone: string): Promise<PendingCharge[]> {
@@ -106,7 +88,7 @@ export default function PublicGroupPage() {
     setChargesError(null);
     setCheckoutError(null);
     if (!isValidPhone(phone)) {
-      setChargesError("Informe um celular brasileiro válido com DDD.");
+      setChargesError("Informe um telefone válido. Para outros países, use o código do país.");
       return;
     }
     setLoadingCharges(true);
@@ -228,7 +210,7 @@ export default function PublicGroupPage() {
                       inputMode="tel"
                       autoComplete="tel"
                       maxLength={PHONE_INPUT_MAX_LENGTH}
-                      placeholder="(11) 99999-9999"
+                      placeholder="(11) 99999-9999 ou +351…"
                       value={phone}
                       onChange={(event) => setPhone(formatPhoneInput(event.target.value))}
                       aria-describedby={chargesError ? "charges-error" : undefined}

@@ -3,16 +3,7 @@ import { organizations, users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { hashPassword, verifyPassword } from "@/lib/password";
-import { parsePhoneBR, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
-
-function isValidOrganizerPhone(value: string): boolean {
-  try {
-    parsePhoneBR(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { parsePhone, isValidPhone, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 
 export const signUpInput = z
   .object({
@@ -24,7 +15,7 @@ export const signUpInput = z
     organizerPhone: z
       .string()
       .max(PHONE_INPUT_MAX_LENGTH)
-      .refine(isValidOrganizerPhone, "Informe um celular brasileiro válido com DDD")
+      .refine(isValidPhone, "Informe um telefone válido com código do país")
       .nullable()
       .optional(),
   })
@@ -52,7 +43,7 @@ export async function signUp(rawInput: SignUpInput) {
   if (existing) return null;
 
   const passwordHash = await hashPassword(input.password);
-  const organizerPhone = input.organizerPhone ? parsePhoneBR(input.organizerPhone) : null;
+  const organizerPhone = input.organizerPhone ? parsePhone(input.organizerPhone) : null;
 
   return db.transaction(async (tx) => {
     const [organization] = await tx
