@@ -991,6 +991,11 @@ ul {
   color: var(--success);
 }
 
+.status-pill--danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
 .setting-card__heading {
   display: flex;
   align-items: flex-start;
@@ -2292,7 +2297,8 @@ ul {
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
-.auth-input input {
+.auth-input input,
+.auth-input select {
   width: 100%;
   min-height: 47px;
   padding: 0 14px;

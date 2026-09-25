@@ -3,6 +3,12 @@ import { charges, billingPeriods, groups, participants, financialContacts } from
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { normalizePhone } from "@/lib/phone";
 
+// A migration 0004 precisou criar este placeholder para cadastros legados
+// cujo nome estava vazio. O UUID é técnico e nunca deve chegar à tela pública.
+function isGeneratedParticipantName(name: string): boolean {
+  return /^Participante[ -]+[a-z0-9-]{8,}$/i.test(name.trim());
+}
+
 /**
  * A resposta vazia é deliberadamente uniforme para grupo/telefone ausente ou
  * inválido. A rota pública não revela qual parte da identificação falhou.
@@ -32,17 +38,27 @@ export async function listPendingChargesByPhone(groupPublicSlug: string, rawPhon
     );
   if (!financialContact) return [];
 
-  const [responsible] = await db
-    .select({ name: participants.name })
+  const contactParticipants = await db
+    .select({ name: participants.name, financialRole: participants.financialRole })
     .from(participants)
     .where(
       and(
         eq(participants.organizationId, group.organizationId),
         eq(participants.financialContactId, financialContact.id),
-        eq(participants.financialRole, "responsible"),
       ),
     );
+  const responsible = contactParticipants.find((participant) => participant.financialRole === "responsible");
   if (!responsible) return [];
+
+  const meaningfulNames = [...new Set(
+    contactParticipants
+      .map((participant) => participant.name.trim())
+      .filter((name) => name && !isGeneratedParticipantName(name)),
+  )];
+  const placeholderFallback = meaningfulNames.length === 1 ? meaningfulNames[0] : null;
+  const payerName = isGeneratedParticipantName(responsible.name)
+    ? placeholderFallback ?? "Responsável financeiro"
+    : responsible.name;
 
   return db
     .select({
@@ -66,5 +82,11 @@ export async function listPendingChargesByPhone(groupPublicSlug: string, rawPhon
       ),
     )
     .orderBy(asc(billingPeriods.referenceMonth), asc(participants.name))
-    .then((rows) => rows.map((row) => ({ ...row, payerName: responsible.name })));
+    .then((rows) => rows.map((row) => ({
+      ...row,
+      participantName: isGeneratedParticipantName(row.participantName)
+        ? placeholderFallback ?? "Participante"
+        : row.participantName,
+      payerName,
+    })));
 }

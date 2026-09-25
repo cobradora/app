@@ -2,6 +2,18 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
+      "path": "/api/cron/whatsapp-dispatch",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/xgate-deposit-events",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/xgate-deposits",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/renewals",
       "schedule": "5 3 * * *"
     },

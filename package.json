@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "dotenv -e .env.test -- vitest run",
     "test:watch": "dotenv -e .env.test -- vitest",
+    "test:xgate": "vitest run --config vitest.xgate.config.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
     "db:migrate:test": "dotenv -e .env.test -- drizzle-kit migrate",
@@ -21,9 +22,11 @@
     "lucide-react": "^1.31.0",
     "next": "16.2.6",
     "pg": "8.20.0",
+    "qrcode": "^1.5.4",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "resend": "^4.8.0",
+    "xgate": "^1.0.7",
     "zod": "^4.4.3"
   },
   "devDependencies": {

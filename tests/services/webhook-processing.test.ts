@@ -196,14 +196,9 @@ describe("processInfinitePayWebhook", () => {
   });
 
   it("webhook repetido (mesmo transaction_nsu) e idempotente e nao duplica payments/allocations", async () => {
-    await db
-      .update(organizations)
-      .set({
-        billingModule: "cobradora",
-        organizerPhoneNormalized: "+5511988887777",
-        organizerPhoneDisplay: "(11) 98888-7777",
-      })
-      .where(eq(organizations.id, organizationId));
+    // Organização segue "dora" (padrão): CobraDora agora usa XGate com exclusividade
+    // e não pode mais ter sessão InfinitePay, então este cenário de webhook InfinitePay
+    // não cobre mais o aviso ao organizador (ver "docs/whatsapp-premium-xgate.md").
     const { checkoutSessionId, totalChargesAmount, webhookToken } = await setupCheckoutSession(
       "idem-webhook-repetido",
     );
@@ -238,17 +233,10 @@ describe("processInfinitePayWebhook", () => {
     const events = await db.select().from(webhookEvents).where(eq(webhookEvents.externalEventId, "txn-repetido-1"));
     expect(events).toHaveLength(1);
 
+    // Plano grátis (dora): enqueueOrganizerListUpdates não cria aviso ao organizador.
     const notifications = await db.select().from(whatsappNotifications);
-    expect(notifications).toHaveLength(1);
-    expect(notifications[0]).toEqual(
-      expect.objectContaining({
-        kind: "organizer_list_update",
-        status: "sent",
-        recipientPhoneNormalized: "+5511988887777",
-        metaMessageId: "wamid.organizador-teste",
-      }),
-    );
-    expect(metaFetch).toHaveBeenCalledTimes(1);
+    expect(notifications).toHaveLength(0);
+    expect(metaFetch).not.toHaveBeenCalled();
   });
 
   it("webhook tardio reconcilia sessao vinculada expirada sem criar um segundo checkout", async () => {

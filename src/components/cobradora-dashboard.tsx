@@ -117,9 +117,6 @@ const DEFAULT_MESSAGE_INTRO = "Olá, pessoal do {grupo}! Aqui está o resumo de 
 const DEFAULT_MESSAGE_OUTRO = "Para pagar, use o link abaixo. Obrigado!";
 const NAME_MAX = 80;
 const MESSAGE_MAX = 500;
-// Temporário: módulo Premium/CobraDora ainda em estabilização (automação via
-// WhatsApp). Reverter pra `false` quando estiver pronto pra reabrir seleção.
-const COBRADORA_TEMPORARILY_DISABLED = true;
 
 function monthLabel(referenceMonth: string): string {
   const [year, month] = referenceMonth.split("-").map(Number);
@@ -1399,8 +1396,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
   const infinitePayConfigured = gatewayAccount?.status === "active";
   const automationConfigured =
     billingSettings?.billingModule === "cobradora" &&
-    Boolean(billingSettings.organizerPhone) &&
-    infinitePayConfigured;
+    isValidPhone(billingSettings.organizerPhone ?? "");
   const billingSettingsDirty = Boolean(
     billingSettings &&
       (billingSettings.billingModule !== billingModuleDraft ||
@@ -1445,13 +1441,13 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
           )}
         </section>
 
-        {!gatewayLoading && !infinitePayConfigured && (
+        {!billingSettingsLoading && billingSettings?.billingModule === "dora" && !gatewayLoading && !infinitePayConfigured && (
           <section className={`gateway-required-banner ${mobileTab === "home" ? "" : "mobile-tab-hidden"}`} aria-labelledby="gateway-required-title">
             <span className="gateway-required-banner__icon"><CreditCard size={22} aria-hidden="true" /></span>
             <div>
               <p className="section-kicker">Etapa obrigatória</p>
               <h2 id="gateway-required-title">Conecte sua conta InfinitePay</h2>
-              <p>Dora e CobraDora usam a InfinitePay para enviar cada pagamento direto para sua conta.</p>
+              <p>No plano gratuito Dora, a InfinitePay envia cada pagamento direto para sua conta.</p>
               <a href="https://www.infinitepay.io/conta" target="_blank" rel="noopener noreferrer">Ainda não tem conta? Abra gratuitamente</a>
             </div>
             {isAdmin && <button className="button button--primary" type="button" onClick={openGatewayModal}>Conectar InfiniteTag</button>}
@@ -1801,7 +1797,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                     : billingSettings.billingModule === "dora"
                       ? "Controle manual"
                       : automationConfigured
-                        ? "Configuração cadastrada"
+                        ? "Telefone cadastrado"
                         : "Configuração pendente"}
                 </span>
               </div>
@@ -1814,9 +1810,9 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                       <input type="radio" name="dashboard-billing-module" checked={billingModuleDraft === "dora"} onChange={() => { setBillingModuleDraft("dora"); setBillingSettingsError(""); }} disabled={!isAdmin || billingSettingsSaving} />
                       <span><strong>Dora</strong><small>Grátis · você copia ou compartilha a lista.</small></span>
                     </label>
-                    <label className={`${billingModuleDraft === "cobradora" ? "selected" : ""} ${COBRADORA_TEMPORARILY_DISABLED ? "disabled" : ""}`}>
-                      <input type="radio" name="dashboard-billing-module" checked={billingModuleDraft === "cobradora"} onChange={() => { setBillingModuleDraft("cobradora"); setBillingSettingsError(""); }} disabled={!isAdmin || billingSettingsSaving || COBRADORA_TEMPORARILY_DISABLED} />
-                      <span><strong>CobraDora</strong><small>{COBRADORA_TEMPORARILY_DISABLED ? "Em breve · automação temporariamente indisponível para novas seleções." : "Automação · cobrança privada e atualização para você."}</small></span>
+                    <label className={billingModuleDraft === "cobradora" ? "selected" : ""}>
+                      <input type="radio" name="dashboard-billing-module" checked={billingModuleDraft === "cobradora"} onChange={() => { setBillingModuleDraft("cobradora"); setBillingSettingsError(""); }} disabled={!isAdmin || billingSettingsSaving} />
+                      <span><strong>CobraDora</strong><small>Premium · cobrança privada e atualização para você.</small></span>
                     </label>
                   </fieldset>
 
@@ -1835,19 +1831,21 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                         disabled={!isAdmin || billingSettingsSaving}
                         aria-describedby="organizer-whatsapp-hint"
                       />
-                      <p id="organizer-whatsapp-hint">Para outros países, use + e o código do país. As listas serão enviadas para este número.</p>
+                      <p id="organizer-whatsapp-hint">Para outros países, use + e o código do país. Este é o número de destino das atualizações de lista.</p>
                     </div>
                   )}
 
-                  <div className={`automation-state ${billingModuleDraft === "cobradora" && infinitePayConfigured && isValidPhone(organizerPhoneInput) ? "automation-state--ready" : ""}`}>
+                  <div className={`automation-state ${billingModuleDraft === "cobradora" && isValidPhone(organizerPhoneInput) ? "automation-state--ready" : ""}`}>
                     {billingModuleDraft === "dora"
                       ? "Na Dora, as ações Copiar link e Compartilhar continuam disponíveis em cada grupo."
-                      : !infinitePayConfigured
-                        ? "Cadastre a InfiniteTag para completar os dados da CobraDora."
-                        : isValidPhone(organizerPhoneInput)
-                          ? "Dados cadastrados. A InfiniteTag e os templates não são verificados automaticamente; faça um checkout e um envio de teste antes do uso real."
-                          : "Informe o WhatsApp do organizador para completar os dados de atualização."}
+                      : isValidPhone(organizerPhoneInput)
+                        ? "Telefone informado. Os envios dependem da configuração do WhatsApp da Meta no servidor, de templates aprovados e das autorizações aplicáveis. O cadastro do telefone não confirma a disponibilidade nem a entrega das mensagens."
+                        : "Informe o WhatsApp do organizador para completar os dados de atualização."}
                   </div>
+
+                  {billingModuleDraft === "cobradora" && (
+                    <p>O Premium usa a XGate para os recebimentos Pix. Complete os dados financeiros em <a className="link" href="/financeiro">Saldo e recebimentos Pix</a>.</p>
+                  )}
 
                   {billingModuleDraft === "cobradora" && (
                     <p className="module-terms-note">
@@ -1858,6 +1856,9 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
                   )}
 
                   {billingSettingsError && <p className="form-error" role="alert">{billingSettingsError}</p>}
+                  {isAdmin && billingSettings.billingModule === "cobradora" && (
+                    <p>Premium selecionado. <a className="link" href="/financeiro">Cadastre seus dados de recebimento Pix</a> para receber pela XGate, com taxa de plataforma de 3% sobre cada pagamento confirmado.</p>
+                  )}
                   {isAdmin && (
                     <div className="setting-actions">
                       <button className="button button--primary" type="button" onClick={saveBillingSettings} disabled={billingSettingsSaving || !billingSettingsDirty || (billingModuleDraft === "cobradora" && !isValidPhone(organizerPhoneInput))}>
@@ -1920,6 +1921,7 @@ export default function CobraDoraDashboard({ user }: { user: DashboardUser }) {
         <div className="app-footer__inner">
           <div className="footer-brand"><Image src={cobraLogo} alt="" width={44} height={44} /><span><strong>CobraDora</strong><small>Sua assistente de cobranças</small></span></div>
           <nav className="footer-nav" aria-label="Atalhos da tela principal">
+            {isAdmin && <a className="footer-link" href="/financeiro">Saldo e recebimentos Pix</a>}
             <a className="footer-link" href="#top">Resumo</a>
             <a className="footer-link" href="#grupos">Grupos</a>
             <a className="footer-link" href="#configuracoes"><Settings2 size={17} /> Configurações</a>

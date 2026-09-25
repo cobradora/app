@@ -10,10 +10,6 @@ import { Spinner } from "@/components/spinner";
 import cobraLogo from "@/images/logo-cobra-sem-fundo.png";
 import { formatPhoneInput, isValidPhone, PHONE_INPUT_MAX_LENGTH } from "@/lib/phone";
 
-// Temporário: módulo Premium/CobraDora ainda em estabilização (automação via
-// WhatsApp). Reverter pra `false` quando estiver pronto pra reabrir seleção.
-const COBRADORA_TEMPORARILY_DISABLED = true;
-
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -23,7 +19,7 @@ function SignupForm() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [billingModule, setBillingModule] = useState<BillingModule>(
-    !COBRADORA_TEMPORARILY_DISABLED && searchParams.get("module") === "cobradora" ? "cobradora" : "dora",
+    searchParams.get("module") === "cobradora" ? "cobradora" : "dora",
   );
   const [organizerPhone, setOrganizerPhone] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -102,16 +98,15 @@ function SignupForm() {
                 <span className="module-option__top"><strong>Grátis</strong><b>R$ 0</b></span>
                 <small>Você acompanha os pagamentos no painel e copia ou compartilha a lista atualizada.</small>
               </label>
-              <label className={`module-option ${billingModule === "cobradora" ? "module-option--selected" : ""} ${COBRADORA_TEMPORARILY_DISABLED ? "module-option--disabled" : ""}`}>
+              <label className={`module-option ${billingModule === "cobradora" ? "module-option--selected" : ""}`}>
                 <input
                   type="radio"
                   name="billing-module"
                   value="cobradora"
                   checked={billingModule === "cobradora"}
                   onChange={() => { setBillingModule("cobradora"); setError(null); }}
-                  disabled={COBRADORA_TEMPORARILY_DISABLED}
                 />
-                <span className="module-option__top"><strong>Premium</strong><b>{COBRADORA_TEMPORARILY_DISABLED ? "Em breve" : "Automação"}</b></span>
+                <span className="module-option__top"><strong>Premium</strong><b>Automação</b></span>
                 <small>Mensalistas recebem a cobrança no privado e você recebe a lista atualizada.</small>
               </label>
             </div>
@@ -141,8 +136,10 @@ function SignupForm() {
           <div className="auth-required-note" role="note">
             <CreditCard size={19} aria-hidden="true" />
             <p>
-              <strong>InfinitePay é obrigatória nos dois módulos.</strong> Depois do cadastro, conecte sua InfiniteTag para receber os pagamentos direto na sua conta.{" "}
-              <a href="https://www.infinitepay.io/conta" target="_blank" rel="noopener noreferrer">Abrir conta InfinitePay</a>
+              <strong>No Grátis, os pagamentos usam a InfinitePay.</strong> Conecte sua InfiniteTag para receber direto na sua conta.{" "}
+              <a href="https://www.infinitepay.io/conta" target="_blank" rel="noopener noreferrer">Abrir conta InfinitePay</a>.{" "}
+              <strong>No Premium, os recebimentos Pix usam a XGate.</strong> Depois do cadastro, complete seus dados em{" "}
+              <Link href="/financeiro">Saldo e recebimentos Pix</Link>. A taxa da plataforma é de 3% sobre cada pagamento confirmado, sem nova taxa de plataforma no saque.
             </p>
           </div>
 

@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { db } from "@/db";
-import { organizations, groups } from "@/db/schema";
+import { organizations, groups, participants } from "@/db/schema";
 import { findOrCreateParticipantByPhone, linkParticipantToGroup } from "@/services/participants";
 import { generateBillingPeriod } from "@/services/billing";
 import { listPendingChargesByPhone } from "@/services/pending-charges";
 import { truncateAll } from "../helpers/db";
+import { eq } from "drizzle-orm";
 
 describe("pending charges", () => {
   let organizationId: string;
@@ -37,5 +38,25 @@ describe("pending charges", () => {
     expect(months).toEqual(["2026-07", "2026-07", "2026-08", "2026-08"]);
     expect(new Set(pending.map((c) => c.participantName))).toEqual(new Set(["Maria", "Pedro"]));
     expect(new Set(pending.map((c) => c.payerName))).toEqual(new Set(["Maria"]));
+  });
+
+  it("não expõe o ID do placeholder legado e usa o nome cadastrado no mesmo contato", async () => {
+    const [responsible] = await db
+      .select()
+      .from(participants)
+      .where(eq(participants.financialRole, "responsible"));
+    await db
+      .update(participants)
+      .set({
+        name: `Participante ${responsible.id}`,
+        nameNormalized: `participante ${responsible.id}`,
+      })
+      .where(eq(participants.id, responsible.id));
+
+    const pending = await listPendingChargesByPhone(groupPublicSlug, "(11) 90000-0009");
+
+    expect(new Set(pending.map((charge) => charge.payerName))).toEqual(new Set(["Pedro"]));
+    expect(pending.some((charge) => charge.participantName.includes(responsible.id))).toBe(false);
+    expect(pending.map((charge) => charge.participantName)).toContain("Pedro");
   });
 });

@@ -349,39 +349,9 @@ describe("whatsapp-reminders service", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("adia configuração de gateway temporária e envia depois da reativação", async () => {
-    await addParticipant("(11) 98812-4410", "Marina Costa");
-    const period = await generateBillingPeriod(organizationId, groupId, "2026-08");
-    await enqueueCycleStartNotifications([period.id]);
-    const [notification] = await db
-      .select()
-      .from(whatsappNotifications)
-      .where(eq(whatsappNotifications.kind, "charge_reminder"));
-    await db
-      .update(gatewayAccounts)
-      .set({ status: "disabled" })
-      .where(eq(gatewayAccounts.organizationId, organizationId));
-    const fetchMock = mockMetaSuccess();
-
-    const deferred = await dispatchWhatsappNotifications([notification.id]);
-    expect(deferred.failures[0].code).toBe("gateway_temporarily_ineligible");
-    expect(fetchMock).not.toHaveBeenCalled();
-    const [waiting] = await db
-      .select()
-      .from(whatsappNotifications)
-      .where(eq(whatsappNotifications.id, notification.id));
-    expect(waiting.attemptCount).toBe(0);
-
-    await db
-      .update(gatewayAccounts)
-      .set({ status: "active" })
-      .where(eq(gatewayAccounts.organizationId, organizationId));
-    await db
-      .update(whatsappNotifications)
-      .set({ nextAttemptAt: new Date("2026-08-01T00:00:00Z") })
-      .where(eq(whatsappNotifications.id, notification.id));
-    expect(await dispatchWhatsappNotifications([notification.id])).toEqual({ sent: 1, skipped: 0, failures: [] });
-  });
+  // "adia configuração de gateway temporária" removida: CobraDora agora usa XGate com
+  // credenciais globais de servidor, sem conta InfinitePay conectável por organização
+  // para desativar/reativar — o cenário que este teste cobria não existe mais.
 
   it("não reativa lembrete histórico depois de meses no modo Dora", async () => {
     await addParticipant("(11) 98812-4410", "Marina Costa");

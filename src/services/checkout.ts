@@ -16,6 +16,7 @@ import { getPaymentsAdapter } from "@/payments";
 import { InfinitePayCheckoutRequestError } from "@/payments/infinitepay-adapter";
 import { deriveCheckoutToken, hashCheckoutToken } from "@/payments/session-tokens";
 import { normalizePhone } from "@/lib/phone";
+import { getOrganizationCheckoutProvider } from "@/payments/gateway-policy";
 
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const CREATION_IN_FLIGHT_MS = 20_000;
@@ -176,6 +177,8 @@ function reconciliationRequired(): never {
  * se o provedor recebeu o POST.
  */
 async function expireSessionIfNeeded(candidate: Session, now = new Date()): Promise<Session> {
+  // The local TTL is not proof that an XGate Pix can no longer be paid.
+  if (candidate.gateway === "xgate") return candidate;
   if (
     candidate.expiresAt.getTime() > now.getTime() ||
     candidate.status === "completed" ||
@@ -239,6 +242,7 @@ export async function expireStaleCheckoutSessions(
     .where(
       and(
         inArray(checkoutSessions.status, ["created", "pending"]),
+        eq(checkoutSessions.gateway, "infinitepay"),
         lte(checkoutSessions.expiresAt, now),
       ),
     )
@@ -485,6 +489,7 @@ async function cancelBlockedSessionAndReleaseCharges(
   await db.transaction(async (tx) => {
     await tx.execute(sql`select id from checkout_sessions where id = ${sessionId} for update`);
     const [session] = await tx.select().from(checkoutSessions).where(eq(checkoutSessions.id, sessionId));
+    if (session?.gateway === "xgate") reconciliationRequired();
     if (
       !session ||
       (!options?.forceEvenWithKnownLink && session.checkoutUrl) ||
@@ -524,6 +529,7 @@ export async function releaseStuckCheckoutForCharge(organizationId: string, char
 
   const blocking = await findOverlappingBlockingSession(organizationId, [chargeId]);
   if (!blocking) return;
+  if (blocking.gateway === "xgate") reconciliationRequired();
 
   await cancelBlockedSessionAndReleaseCharges(blocking.id, { forceEvenWithKnownLink: true });
 }
@@ -543,6 +549,7 @@ async function tryResolveBlockedSession(
   payerName: string,
 ): Promise<{ resumed: ReturnType<typeof checkoutResult> | null; reset: boolean }> {
   const blocking = await findOverlappingBlockingSession(organizationId, chargeIds);
+  if (blocking?.gateway === "xgate") reconciliationRequired();
   if (!blocking || (!requiresReconciliation(blocking) && blocking.status !== "expired")) {
     return { resumed: null, reset: false };
   }
@@ -898,7 +905,15 @@ export async function createCheckoutForCharges(
   const [organization] = await db
     .select({ name: organizations.name })
     .from(organizations)
-    .where(eq(organizations.id, group.organizationId));
+    .where(and(eq(organizations.id, group.organizationId), eq(organizations.status, "active")));
+  if (!organization) throw new PublicCheckoutError("group_not_found", "Grupo não encontrado", 404);
+  if (await getOrganizationCheckoutProvider(group.organizationId) !== "infinitepay") {
+    throw new PublicCheckoutError(
+      "gateway_not_configured",
+      "Esta organização recebe por Pix. Atualize o link do grupo para continuar o pagamento.",
+      409,
+    );
+  }
 
   const phoneNormalized = normalizeAndValidatePhone(rawPhone);
   const [financialContact] = await db
@@ -991,6 +1006,7 @@ export async function createCheckoutForCharges(
   let resumed = false;
 
   if (sameKeySession) {
+    if (sameKeySession.gateway !== "infinitepay") reconciliationRequired();
     if (!(await sessionMatchesRequest(sameKeySession, responsible.id, financialContact.id, fingerprint, uniqueChargeIds))) {
       throw new PublicCheckoutError(
         "idempotency_conflict",

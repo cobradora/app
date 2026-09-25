@@ -4,7 +4,6 @@ import {
   billingPeriods,
   charges,
   financialContacts,
-  gatewayAccounts,
   groups,
   organizations,
   participants,
@@ -215,14 +214,6 @@ export async function enqueueChargeReminderNotifications(billingPeriodIds?: stri
     .innerJoin(billingPeriods, eq(charges.billingPeriodId, billingPeriods.id))
     .innerJoin(groups, eq(billingPeriods.groupId, groups.id))
     .innerJoin(organizations, eq(groups.organizationId, organizations.id))
-    .innerJoin(
-      gatewayAccounts,
-      and(
-        eq(gatewayAccounts.organizationId, organizations.id),
-        eq(gatewayAccounts.provider, "infinitepay"),
-        eq(gatewayAccounts.status, "active"),
-      ),
-    )
     .innerJoin(participants, eq(charges.participantId, participants.id))
     .innerJoin(financialContacts, eq(participants.financialContactId, financialContacts.id))
     .where(
@@ -352,14 +343,6 @@ export async function enqueueOrganizerCycleStartNotifications(billingPeriodIds: 
     .from(billingPeriods)
     .innerJoin(groups, eq(billingPeriods.groupId, groups.id))
     .innerJoin(organizations, eq(groups.organizationId, organizations.id))
-    .innerJoin(
-      gatewayAccounts,
-      and(
-        eq(gatewayAccounts.organizationId, organizations.id),
-        eq(gatewayAccounts.provider, "infinitepay"),
-        eq(gatewayAccounts.status, "active"),
-      ),
-    )
     .where(
       and(
         inArray(billingPeriods.id, selectedBillingPeriodIds),
@@ -420,14 +403,6 @@ export async function enqueueLatestCycleStartNotifications(): Promise<string[]> 
     .from(billingPeriods)
     .innerJoin(groups, eq(billingPeriods.groupId, groups.id))
     .innerJoin(organizations, eq(groups.organizationId, organizations.id))
-    .innerJoin(
-      gatewayAccounts,
-      and(
-        eq(gatewayAccounts.organizationId, organizations.id),
-        eq(gatewayAccounts.provider, "infinitepay"),
-        eq(gatewayAccounts.status, "active"),
-      ),
-    )
     .where(
       and(
         eq(groups.status, "active"),
@@ -570,17 +545,6 @@ async function eligibleNotification(
 
   if (notification.kind === "organizer_cycle_start") {
     if (!organization.organizerPhoneNormalized) return { state: "deferred", code: "organizer_phone_missing" };
-    const [gatewayAccount] = await db
-      .select({ id: gatewayAccounts.id })
-      .from(gatewayAccounts)
-      .where(
-        and(
-          eq(gatewayAccounts.organizationId, notification.organizationId),
-          eq(gatewayAccounts.provider, "infinitepay"),
-          eq(gatewayAccounts.status, "active"),
-        ),
-      );
-    if (!gatewayAccount) return { state: "deferred", code: "gateway_temporarily_ineligible" };
     const payload = await buildOrganizerCycleStartPayload(
       db,
       notification.organizationId,
@@ -591,17 +555,6 @@ async function eligibleNotification(
   }
 
   if (!notification.financialContactId) return { state: "terminal", code: "payload_invalid" };
-  const [gatewayAccount] = await db
-    .select({ id: gatewayAccounts.id })
-    .from(gatewayAccounts)
-    .where(
-      and(
-        eq(gatewayAccounts.organizationId, notification.organizationId),
-        eq(gatewayAccounts.provider, "infinitepay"),
-        eq(gatewayAccounts.status, "active"),
-      ),
-    );
-  if (!gatewayAccount) return { state: "deferred", code: "gateway_temporarily_ineligible" };
 
   const currentCharges = await db
     .select({
@@ -735,6 +688,7 @@ async function deferNotification(
 /** Claim com fencing por attemptCount; a ambiguidade do efeito externo permanece. */
 export async function dispatchWhatsappNotifications(
   notificationIds?: string[],
+  batchLimit = 200,
 ): Promise<{ sent: number; skipped: number; failures: WhatsappDispatchFailure[] }> {
   if (notificationIds && notificationIds.length === 0) return { sent: 0, skipped: 0, failures: [] };
   await db
@@ -764,7 +718,7 @@ export async function dispatchWhatsappNotifications(
     .from(whatsappNotifications)
     .where(and(...conditions))
     .orderBy(whatsappNotifications.createdAt)
-    .limit(200);
+    .limit(Math.max(1, Math.min(200, Math.trunc(batchLimit))));
 
   let sent = 0;
   let skipped = 0;
@@ -836,6 +790,14 @@ export async function dispatchWhatsappNotifications(
       if (updated) sent += 1;
     } catch (error) {
       const failedAt = new Date();
+      // Configuration is repairable without consuming a real delivery attempt.
+      // Keep queued payment updates recoverable while the operator configures Meta.
+      if (error instanceof WhatsappSendError && ["not_configured", "template_not_configured", "app_base_url_invalid", "configuration_invalid"].includes(error.code)) {
+        if (await deferNotification(claimed, error.code, failedAt)) {
+          failures.push({ notificationId: claimed.id, code: error.code });
+        }
+        continue;
+      }
       const policy = failurePolicy(error);
       const exhausted = policy.retryable && claimed.attemptCount >= MAX_SEND_ATTEMPTS;
       const code = exhausted ? `${policy.code}_retry_exhausted` : policy.code;

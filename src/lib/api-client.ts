@@ -207,6 +207,22 @@ export type GatewayAccount = {
   status: "pending" | "active" | "disabled";
 };
 
+export type PixKeyType = "CPF" | "CNPJ" | "EMAIL" | "PHONE" | "RANDOM";
+
+export type PayoutProfileInput = {
+  name: string;
+  document: string;
+  email?: string;
+  phone?: string;
+  pixKeyType: PixKeyType;
+  pixKey: string;
+};
+
+export type WithdrawalRequestInput = {
+  amountCents: number;
+  idempotencyKey: string;
+};
+
 export const apiClient = {
   /** POST /api/auth/login — em sucesso, o cookie de sessao ja vem setado na resposta. */
   async login(input: LoginInput) {
@@ -474,5 +490,23 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify(input),
     });
+  },
+
+  /** POST /api/finance/payout-profile — cadastra ou substitui a chave Pix de recebimento da organização. */
+  async registerPayoutProfile(input: PayoutProfileInput) {
+    const data = await request<{ profile: { status: "active" } }>("/api/finance/payout-profile", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    return data.profile;
+  },
+
+  /** POST /api/finance/withdrawals — solicita um saque do saldo disponível. */
+  async requestWithdrawal(input: WithdrawalRequestInput) {
+    const data = await request<{ withdrawal: { withdrawalId: string } }>("/api/finance/withdrawals", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    return data.withdrawal;
   },
 };

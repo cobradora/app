@@ -3,6 +3,7 @@ import {
   uuid,
   varchar,
   integer,
+  bigint,
   timestamp,
   date,
   pgEnum,
@@ -76,6 +77,9 @@ export const whatsappDeliveryStatusEnum = pgEnum("whatsapp_delivery_status", [
 ]);
 export const auditActorTypeEnum = pgEnum("audit_actor_type", ["user", "system", "participant"]);
 export const devicePlatformEnum = pgEnum("device_platform", ["ios", "android"]);
+export const depositStatusEnum = pgEnum("deposit_status", ["created", "pending", "confirmed", "failed", "refunded"]);
+export const withdrawalStatusEnum = pgEnum("withdrawal_status", ["created", "reserved", "pending", "completed", "failed"]);
+export const ledgerKindEnum = pgEnum("ledger_kind", ["deposit", "refund", "withdrawal_reserve", "withdrawal_settle", "withdrawal_release"]);
 
 // ---------- organizations ----------
 export const organizations = pgTable("organizations", {
@@ -306,6 +310,7 @@ export const checkoutSessions = pgTable("checkout_sessions", {
 }, (table) => ({
   idempotencyUnique: uniqueIndex("checkout_sessions_organization_idempotency_unique")
     .on(table.organizationId, table.idempotencyKey),
+  tenantIdentity: uniqueIndex("checkout_sessions_tenant_identity").on(table.organizationId, table.id),
   financialContactIndex: index("checkout_sessions_financial_contact_idx").on(table.financialContactId),
   requestFingerprintIndex: index("checkout_sessions_request_fingerprint_idx")
     .on(table.organizationId, table.requestFingerprint),
@@ -437,6 +442,7 @@ export const webhookEvents = pgTable("webhook_events", {
   externalEventId: varchar("external_event_id", { length: 200 }).notNull(),
   eventType: varchar("event_type", { length: 80 }).notNull(),
   payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+  reconciliationHint: jsonb("reconciliation_hint").$type<{ depositId: string; transactionId: string }>(),
   processingStatus: webhookProcessingStatusEnum("processing_status").notNull().default("received"),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
   processedAt: timestamp("processed_at", { withTimezone: true }),
@@ -485,6 +491,118 @@ export const devicePushTokens = pgTable("device_push_tokens", {
 }, (table) => ({
   expoPushTokenUnique: uniqueIndex("device_push_tokens_expo_push_token_unique").on(table.expoPushToken),
   organizationIndex: index("device_push_tokens_organization_idx").on(table.organizationId),
+}));
+
+// Virtual balances belong to an organization, not an XGate subaccount.
+export const organizationBalances = pgTable("organization_balances", {
+  organizationId: uuid("organization_id").primaryKey().references(() => organizations.id),
+  settledAmount: bigint("settled_amount", { mode: "number" }).notNull().default(0),
+  reservedAmount: bigint("reserved_amount", { mode: "number" }).notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  validAmounts: check("organization_balances_valid_amounts", sql`${t.reservedAmount} >= 0 and abs(${t.settledAmount}) <= 9007199254740991 and ${t.reservedAmount} <= 9007199254740991`),
+}));
+
+export const payerGatewayProfiles = pgTable("payer_gateway_profiles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  financialContactId: uuid("financial_contact_id").notNull(),
+  provider: varchar("provider", { length: 30 }).notNull().default("xgate"),
+  name: varchar("name", { length: 200 }).notNull(),
+  document: varchar("document", { length: 14 }).notNull(),
+  email: varchar("email", { length: 255 }),
+  phone: varchar("phone", { length: 25 }),
+  providerCustomerId: varchar("provider_customer_id", { length: 200 }),
+  status: varchar("status", { length: 30 }).notNull().default("pending"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  contactFk: foreignKey({ columns: [t.organizationId, t.financialContactId], foreignColumns: [financialContacts.organizationId, financialContacts.id] }),
+  identityUnique: uniqueIndex("payer_gateway_profiles_identity_unique").on(t.organizationId, t.financialContactId, t.provider),
+}));
+
+export const organizationPayoutProfiles = pgTable("organization_payout_profiles", {
+  organizationId: uuid("organization_id").primaryKey().references(() => organizations.id),
+  name: varchar("name", { length: 200 }).notNull(),
+  document: varchar("document", { length: 14 }).notNull(),
+  email: varchar("email", { length: 255 }),
+  phone: varchar("phone", { length: 25 }),
+  providerCustomerId: varchar("provider_customer_id", { length: 200 }),
+  pixKeyType: varchar("pix_key_type", { length: 20 }).notNull(),
+  pixKey: varchar("pix_key", { length: 255 }).notNull(),
+  providerPixKeyId: varchar("provider_pix_key_id", { length: 200 }),
+  providerPixKey: jsonb("provider_pix_key").$type<Record<string, unknown>>(),
+  status: varchar("status", { length: 30 }).notNull().default("pending"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const gatewayDeposits = pgTable("gateway_deposits", {
+  id: uuid("id").defaultRandom().primaryKey(), // Also the provider externalId.
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  financialContactId: uuid("financial_contact_id").notNull(),
+  checkoutSessionId: uuid("checkout_session_id").references(() => checkoutSessions.id),
+  provider: varchar("provider", { length: 30 }).notNull().default("xgate"),
+  providerTransactionId: varchar("provider_transaction_id", { length: 200 }),
+  grossAmount: integer("gross_amount").notNull(),
+  feeRateBps: integer("fee_rate_bps").notNull().default(300),
+  feeAmount: integer("fee_amount").notNull(),
+  netAmount: integer("net_amount").notNull(),
+  status: depositStatusEnum("status").notNull().default("created"),
+  pixCopyPaste: text("pix_copy_paste"),
+  externalCreationState: varchar("external_creation_state", { length: 24 }).notNull().default("not_started"),
+  externalRequestStartedAt: timestamp("external_request_started_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  contactFk: foreignKey({ columns: [t.organizationId, t.financialContactId], foreignColumns: [financialContacts.organizationId, financialContacts.id] }),
+  providerUnique: uniqueIndex("gateway_deposits_provider_transaction_unique").on(t.provider, t.providerTransactionId),
+  sessionFk: foreignKey({ columns: [t.organizationId, t.checkoutSessionId], foreignColumns: [checkoutSessions.organizationId, checkoutSessions.id] }),
+  sessionUnique: uniqueIndex("gateway_deposits_session_unique").on(t.checkoutSessionId),
+  creationStateCheck: check("gateway_deposits_creation_state_check", sql`${t.externalCreationState} in ('not_started', 'in_flight', 'ambiguous', 'linked')`),
+  tenantIdentity: uniqueIndex("gateway_deposits_tenant_identity").on(t.organizationId, t.id),
+  validAmounts: check("gateway_deposits_valid_amounts", sql`${t.grossAmount} > 0 and ${t.feeRateBps} between 0 and 10000 and ${t.feeAmount} = floor((${t.grossAmount}::bigint * ${t.feeRateBps} + 5000) / 10000) and ${t.netAmount} = ${t.grossAmount} - ${t.feeAmount}`),
+}));
+
+export const withdrawals = pgTable("withdrawals", {
+  id: uuid("id").defaultRandom().primaryKey(), // Also the provider externalId.
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  provider: varchar("provider", { length: 30 }).notNull().default("xgate"),
+  providerTransactionId: varchar("provider_transaction_id", { length: 200 }),
+  idempotencyKey: varchar("idempotency_key", { length: 100 }).notNull(),
+  amount: integer("amount").notNull(), // No additional withdrawal fee.
+  status: withdrawalStatusEnum("status").notNull().default("created"),
+  beneficiarySnapshot: jsonb("beneficiary_snapshot").$type<Record<string, unknown>>().notNull(),
+  failureReason: text("failure_reason"),
+  externalCreationState: varchar("external_creation_state", { length: 24 }).notNull().default("not_started"),
+  externalRequestStartedAt: timestamp("external_request_started_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  positiveAmount: check("withdrawals_positive_amount", sql`${t.amount} > 0`),
+  providerUnique: uniqueIndex("withdrawals_provider_transaction_unique").on(t.provider, t.providerTransactionId),
+  tenantIdentity: uniqueIndex("withdrawals_tenant_identity").on(t.organizationId, t.id),
+  idempotencyUnique: uniqueIndex("withdrawals_idempotency_unique").on(t.organizationId, t.idempotencyKey),
+  creationStateCheck: check("withdrawals_creation_state_check", sql`${t.externalCreationState} in ('not_started', 'in_flight', 'ambiguous', 'linked')`),
+}));
+
+export const organizationLedgerEntries = pgTable("organization_ledger_entries", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organizations.id),
+  provider: varchar("provider", { length: 30 }).notNull(),
+  operationId: varchar("operation_id", { length: 250 }).notNull(),
+  kind: ledgerKindEnum("kind").notNull(),
+  amount: integer("amount").notNull(), // Signed change to settled balance.
+  reservedDelta: integer("reserved_delta").notNull().default(0),
+  depositId: uuid("deposit_id"),
+  withdrawalId: uuid("withdrawal_id"),
+  grossAmount: integer("gross_amount"),
+  feeAmount: integer("fee_amount"),
+  feeRateBps: integer("fee_rate_bps"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  operationUnique: uniqueIndex("organization_ledger_operation_unique").on(t.provider, t.operationId),
+  orgIndex: index("organization_ledger_org_idx").on(t.organizationId, t.createdAt),
+  depositFk: foreignKey({ columns: [t.organizationId, t.depositId], foreignColumns: [gatewayDeposits.organizationId, gatewayDeposits.id] }),
+  withdrawalFk: foreignKey({ columns: [t.organizationId, t.withdrawalId], foreignColumns: [withdrawals.organizationId, withdrawals.id] }),
 }));
 
 // ---------- app_notifications ----------
